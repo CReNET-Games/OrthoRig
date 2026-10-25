@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OrthoRig — Operative Fight-Box MVP</title>
+    <style>
+      :root {
+        --void-black: #0a0b0e;
+        --stark-white: #f4f6f8;
+        --operative-cyan: #00f0ff;
+        --threat-red: #ff2a54;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        background-color: var(--void-black);
+        color: var(--stark-white);
+        font-family: "JetBrains Mono", "Fira Code", monospace, sans-serif;
+        overflow: hidden;
+        user-select: none;
+      }
+      #app {
+        width: 100vw;
+        height: 100vh;
+        position: relative;
+      }
+      .debug-panel {
+        position: fixed;
+        top: 18px;
+        right: 18px;
+        width: 310px;
+        background: rgba(10, 11, 14, 0.92);
+        border: 1px solid rgba(244, 246, 248, 0.35);
+        border-top: 2px solid var(--operative-cyan);
+        clip-path: polygon(
+          0 0,
+          calc(100% - 14px) 0,
+          100% 14px,
+          100% 100%,
+          14px 100%,
+          0 calc(100% - 14px)
+        );
+        padding: 16px 18px;
+        z-index: 20;
+      }
+      .panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+        border-bottom: 1px solid rgba(244, 246, 248, 0.14);
+        padding-bottom: 6px;
+      }
+      .panel-title {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 1.8px;
+        text-transform: uppercase;
+        color: var(--operative-cyan);
+      }
+      .panel-badge {
+        font-size: 10px;
+        color: var(--stark-white);
+        opacity: 0.7;
+      }
+      .section-label {
+        font-size: 10px;
+        letter-spacing: 1.2px;
+        text-transform: uppercase;
+        color: rgba(244, 246, 248, 0.65);
+        margin: 10px 0 6px;
+      }
+      .btn-row {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 6px;
+      }
+      .btn {
+        background: rgba(244, 246, 248, 0.04);
+        color: var(--stark-white);
+        border: 1px solid rgba(244, 246, 248, 0.3);
+        padding: 6px 8px;
+        font-family: inherit;
+        font-size: 11px;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition: all 0.12s ease;
+      }
+      .btn:hover,
+      .btn.active {
+        border-color: var(--operative-cyan);
+        color: var(--operative-cyan);
+        background: rgba(0, 240, 255, 0.08);
+      }
+      .btn-full {
+        grid-column: span 2;
+      }
+      .slider-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      input[type="range"] {
+        flex: 1;
+        accent-color: var(--operative-cyan);
+        cursor: pointer;
+      }
+      .speed-val {
+        font-size: 11px;
+        color: var(--operative-cyan);
+        min-width: 38px;
+        text-align: right;
+      }
+      .controls-hint {
+        margin-top: 12px;
+        padding-top: 8px;
+        border-top: 1px solid rgba(244, 246, 248, 0.14);
+        font-size: 10px;
+        line-height: 1.55;
+        color: rgba(244, 246, 248, 0.72);
+      }
+      .controls-hint b {
+        color: var(--stark-white);
+      }
+      .telemetry {
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid rgba(244, 246, 248, 0.14);
+        font-size: 10px;
+        line-height: 1.5;
+        color: rgba(244, 246, 248, 0.8);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="debug-panel">
+      <div class="panel-header">
+        <span class="panel-title">OrthoRig // Fight-Box</span>
+        <span class="panel-badge">@crenet/orthorig</span>
+      </div>
+
+      <div class="btn-row">
+        <button id="btn-debug-toggle" class="btn btn-full active" type="button">
+          Skeleton Debug: ON
+        </button>
+      </div>
+
+      <div class="section-label">Animation Speed</div>
+      <div class="slider-row">
+        <input
+          id="slider-speed"
+          type="range"
+          min="0"
+          max="2.5"
+          step="0.05"
+          value="1"
+        />
+        <span id="label-speed" class="speed-val">1.00x</span>
+      </div>
+
+      <div class="section-label">Action Override</div>
+      <div class="btn-row">
+        <button id="btn-act-auto" class="btn btn-full active" type="button">
+          Auto (Locomotion)
+        </button>
+        <button id="btn-act-idle" class="btn" type="button">Idle</button>
+        <button id="btn-act-run" class="btn" type="button">Run</button>
+        <button id="btn-act-jump" class="btn" type="button">Jump</button>
+        <button id="btn-act-wall" class="btn" type="button">WallSlide</button>
+      </div>
+
+      <div class="controls-hint">
+        <b>A / D / L-STICK</b> Run &nbsp;|&nbsp; <b>SPACE / A / LB</b> Jump<br />
+        <b>SHIFT / B / LT</b> Dash &nbsp;|&nbsp; <b>WALL + MOVE</b> Wall-Slide<br />
+        <b>MOUSE / R-STICK</b> 360° IK Aim &nbsp;|&nbsp; <b>LMB / RT / RB</b> Fire
+      </div>
+
+      <div id="telemetry" class="telemetry">Initializing arena...</div>
+    </div>
+
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
