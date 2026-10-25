@@ -1,6 +1,6 @@
 {
 	"name": "@crenet/orthorig",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "MIT-licensed 2D orthographic skeletal animation and Analytic 2-Bone IK runtime for PixiJS v8.",
 	"keywords": [
 		"pixijs",

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.0](https://github.com/CReNET-Games/OrthoRig/compare/v0.1.0...v0.2.0) (2026-10-25)
+
+
+### Features
+
+* **demo:** add two-handed IK grip, muzzle socket VFX, additive recoil, footstep events, and atlas toggle ([9f4349f](https://github.com/CReNET-Games/OrthoRig/commit/9f4349f027d05186d04b6ebb3f80064e4c59f2a4))
+* **runtime:** add multi-target IK, look-at solver, sockets, timeline events, layered blending, and atlas mode ([14cfbfb](https://github.com/CReNET-Games/OrthoRig/commit/14cfbfb0fc2561014339789b6505f2afe36dd44d))
+* **schema,blender:** add sockets, look-at constraints, timeline events, and spritesheet baker ([fd9c56d](https://github.com/CReNET-Games/OrthoRig/commit/fd9c56d71ef6b1a480b90b052bc3c904ba628adc))
+
 ## [0.1.0](https://github.com/CReNET-Games/OrthoRig/compare/v0.0.1...v0.1.0) (2026-10-25)
 
 
