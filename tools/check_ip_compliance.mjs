@@ -29,8 +29,10 @@ const ALLOWED_RUNTIME_LICENSES = new Set([
 const ALLOWED_SCHEMA_ROOT_KEYS = new Set([
 	"meta",
 	"bones",
+	"sockets",
 	"slots",
 	"ik_constraints",
+	"look_at_constraints",
 	"animations",
 ]);
 

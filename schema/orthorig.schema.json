@@ -27,6 +27,10 @@
 				"coordinateSystem": {
 					"type": "string",
 					"const": "pixi-y-down"
+				},
+				"atlasTexture": {
+					"type": "string",
+					"minLength": 1
 				}
 			}
 		},
@@ -53,6 +57,21 @@
 					"restY": { "type": "number" },
 					"restRotation": { "type": "number" },
 					"zIndex": { "type": "integer" }
+				}
+			}
+		},
+		"sockets": {
+			"type": "array",
+			"items": {
+				"type": "object",
+				"required": ["name", "bone", "x", "y", "rotation"],
+				"additionalProperties": false,
+				"properties": {
+					"name": { "type": "string", "minLength": 1 },
+					"bone": { "type": "string", "minLength": 1 },
+					"x": { "type": "number" },
+					"y": { "type": "number" },
+					"rotation": { "type": "number" }
 				}
 			}
 		},
@@ -130,10 +149,39 @@
 						"maxItems": 2
 					},
 					"target": { "type": "string", "minLength": 1 },
+					"targetSocket": { "type": "string", "minLength": 1 },
 					"bendDirection": {
 						"type": "integer",
 						"enum": [1, -1]
+					},
+					"autoFlipFacing": {
+						"type": "boolean"
+					},
+					"mix": {
+						"type": "number",
+						"minimum": 0,
+						"maximum": 1
 					}
+				}
+			}
+		},
+		"look_at_constraints": {
+			"type": "array",
+			"items": {
+				"type": "object",
+				"required": ["name", "bone", "target"],
+				"additionalProperties": false,
+				"properties": {
+					"name": { "type": "string", "minLength": 1 },
+					"bone": { "type": "string", "minLength": 1 },
+					"target": { "type": "string", "minLength": 1 },
+					"mix": {
+						"type": "number",
+						"minimum": 0,
+						"maximum": 1
+					},
+					"minAngle": { "type": "number" },
+					"maxAngle": { "type": "number" }
 				}
 			}
 		},
@@ -147,6 +195,18 @@
 				"properties": {
 					"duration": { "type": "number", "minimum": 0 },
 					"loop": { "type": "boolean" },
+					"events": {
+						"type": "array",
+						"items": {
+							"type": "object",
+							"required": ["name", "time"],
+							"additionalProperties": false,
+							"properties": {
+								"name": { "type": "string", "minLength": 1 },
+								"time": { "type": "number", "minimum": 0 }
+							}
+						}
+					},
 					"tracks": {
 						"type": "object",
 						"additionalProperties": {

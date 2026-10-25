@@ -13,11 +13,15 @@ Responsibilities:
 3. Generates 2D cutout mesh planes parented to each bone, styled in the
    "High-Gloss Survival" palette (#0A0B0E Void Black, #F4F6F8 Stark White,
    #00F0FF Operative Cyan, #FF2A54 Threat Red), offsetting Y-depth for draw order.
-4. Attaches custom properties on `upper_arm_r` / `forearm_r` defining the 2-bone
-   IK chain (`ik_target = "aim_cursor"`, `bend_dir = 1`).
-5. Programmatically authors 4 distinct Blender Actions (`Idle`, `Run`, `Jump`, `WallSlide`)
-   using sine/cosine keyframe curves with Blender 4.x/5.x ActionSlot compatibility.
-6. Saves the file to `examples/operative-mvp/assets/source/operative_demo.blend`.
+4. Creates named `EMPTY` socket objects (`muzzle`, `offhand_grip`, `head_top`, `thruster`)
+   parented to bones for runtime attachment & projectile spawning.
+5. Attaches custom properties for:
+   - Primary 2-Bone IK chain `right_arm_aim` (`upper_arm_r` -> `forearm_r` tracking `aim_cursor`)
+   - Secondary 2-Bone IK chain `left_arm_grip` (`upper_arm_l` -> `forearm_l` tracking socket `offhand_grip`)
+   - 1-Bone Look-At constraint `head_look_at` (`head` tracking `aim_cursor` with clamped neck angles)
+6. Programmatically authors 5 Blender Actions (`Idle`, `Run`, `Jump`, `WallSlide`, `Recoil`)
+   with Pose Markers (`footstep_r`, `footstep_l`, `jump_launch`) and Blender 4.x/5.x ActionSlot compatibility.
+7. Saves the file to `examples/operative-mvp/assets/source/operative_demo.blend`.
 """
 
 from __future__ import annotations
@@ -87,7 +91,7 @@ BONE_SPECS: List[Dict[str, Any]] = [
         "name": "forearm_l",
         "parent": "upper_arm_l",
         "head": (0.0, 0.0, 76.0),
-        "tail": (14.0, 0.0, 68.0),
+        "tail": (24.0, 0.0, 76.0),
         "connected": True,
         "y_depth": -0.008,
     },
@@ -141,6 +145,38 @@ BONE_SPECS: List[Dict[str, Any]] = [
     },
 ]
 
+# Named sockets parented to bones (in bone-local PixiJS X-Y coordinates).
+SOCKET_SPECS: List[Dict[str, Any]] = [
+    {
+        "name": "muzzle",
+        "bone": "forearm_r",
+        "x": 37.0,
+        "y": 0.0,
+        "rotation": 0.0,
+    },
+    {
+        "name": "offhand_grip",
+        "bone": "forearm_r",
+        "x": 11.0,
+        "y": 2.0,
+        "rotation": 0.0,
+    },
+    {
+        "name": "head_top",
+        "bone": "head",
+        "x": 24.0,
+        "y": 0.0,
+        "rotation": 0.0,
+    },
+    {
+        "name": "thruster",
+        "bone": "torso",
+        "x": 25.0,
+        "y": -12.0,
+        "rotation": 0.0,
+    },
+]
+
 # Cutout 2D mesh planes parented to bones.
 # More negative y_depth = closer to front orthographic camera (-Y) = higher zIndex (int(round(-y_depth * 1000))).
 SLOT_SPECS: List[Dict[str, Any]] = [
@@ -160,9 +196,9 @@ SLOT_SPECS: List[Dict[str, Any]] = [
         "name": "slot_forearm_l",
         "bone": "forearm_l",
         "shape_type": "rect",
-        "offset_x": 8.0,
+        "offset_x": 12.0,
         "offset_y": 0.0,
-        "width": 18.0,
+        "width": 24.0,
         "height": 8.0,
         "y_depth": -0.008,
         "color": PALETTE["VOID_BLACK"],
@@ -375,12 +411,14 @@ def create_operative_armature() -> bpy.types.Object:
         pbone.rotation_mode = "XYZ"
         pbone["y_depth"] = float(spec["y_depth"])
 
-    # Attach custom properties on upper_arm_r / forearm_r defining the 2-bone IK chain
+    # Primary 2-Bone IK chain: right_arm_aim (upper_arm_r -> forearm_r tracking aim_cursor)
     arm_obj.pose.bones["upper_arm_r"]["ik_chain_name"] = "right_arm_aim"
     arm_obj.pose.bones["upper_arm_r"]["ik_role"] = "upper"
     arm_obj.pose.bones["upper_arm_r"]["ik_lower_bone"] = "forearm_r"
     arm_obj.pose.bones["upper_arm_r"]["ik_target"] = "aim_cursor"
     arm_obj.pose.bones["upper_arm_r"]["bend_dir"] = 1
+    arm_obj.pose.bones["upper_arm_r"]["auto_flip_facing"] = True
+    arm_obj.pose.bones["upper_arm_r"]["ik_mix"] = 1.0
 
     arm_obj.pose.bones["forearm_r"]["ik_chain_name"] = "right_arm_aim"
     arm_obj.pose.bones["forearm_r"]["ik_role"] = "lower"
@@ -388,7 +426,78 @@ def create_operative_armature() -> bpy.types.Object:
     arm_obj.pose.bones["forearm_r"]["ik_target"] = "aim_cursor"
     arm_obj.pose.bones["forearm_r"]["bend_dir"] = 1
 
+    # Secondary 2-Bone IK chain: left_arm_grip (upper_arm_l -> forearm_l tracking socket offhand_grip)
+    arm_obj.pose.bones["upper_arm_l"]["ik_chain_name"] = "left_arm_grip"
+    arm_obj.pose.bones["upper_arm_l"]["ik_role"] = "upper"
+    arm_obj.pose.bones["upper_arm_l"]["ik_lower_bone"] = "forearm_l"
+    arm_obj.pose.bones["upper_arm_l"]["ik_target"] = "offhand_grip"
+    arm_obj.pose.bones["upper_arm_l"]["ik_target_socket"] = "offhand_grip"
+    arm_obj.pose.bones["upper_arm_l"]["bend_dir"] = 1
+    arm_obj.pose.bones["upper_arm_l"]["auto_flip_facing"] = False
+    arm_obj.pose.bones["upper_arm_l"]["ik_mix"] = 1.0
+
+    arm_obj.pose.bones["forearm_l"]["ik_chain_name"] = "left_arm_grip"
+    arm_obj.pose.bones["forearm_l"]["ik_role"] = "lower"
+    arm_obj.pose.bones["forearm_l"]["ik_upper_bone"] = "upper_arm_l"
+    arm_obj.pose.bones["forearm_l"]["ik_target"] = "offhand_grip"
+    arm_obj.pose.bones["forearm_l"]["bend_dir"] = 1
+
+    # 1-Bone Look-At constraint on head tracking aim_cursor with clamped neck angles
+    arm_obj.pose.bones["head"]["look_at_name"] = "head_look_at"
+    arm_obj.pose.bones["head"]["look_at_target"] = "aim_cursor"
+    arm_obj.pose.bones["head"]["look_at_mix"] = 0.55
+    arm_obj.pose.bones["head"]["look_at_min_angle"] = -0.65
+    arm_obj.pose.bones["head"]["look_at_max_angle"] = 0.65
+
     return arm_obj
+
+
+def create_socket_empties(arm_obj: bpy.types.Object) -> List[bpy.types.Object]:
+    """Create named Blender EMPTY socket objects parented to armature bones."""
+    bpy.context.view_layer.update()
+    created_sockets: List[bpy.types.Object] = []
+
+    for spec in SOCKET_SPECS:
+        socket_name = str(spec["name"])
+        bone_name = str(spec["bone"])
+        lx = float(spec["x"])
+        ly = float(spec["y"])
+        lrot = float(spec["rotation"])
+
+        empty_obj = bpy.data.objects.new(f"socket_{socket_name}", None)
+        empty_obj.empty_display_type = "ARROWS"
+        empty_obj.empty_display_size = 4.0
+        bpy.context.collection.objects.link(empty_obj)
+
+        empty_obj["socket_name"] = socket_name
+        empty_obj["bone_name"] = bone_name
+        empty_obj["socket_x"] = lx
+        empty_obj["socket_y"] = ly
+        empty_obj["socket_rotation"] = lrot
+
+        pbone = arm_obj.pose.bones[bone_name]
+        hx, _, hz = pbone.head
+        tx, _, tz = pbone.tail
+        theta_pixi = math.atan2(-(tz - hz), tx - hx)
+        cos_t = math.cos(theta_pixi)
+        sin_t = math.sin(theta_pixi)
+        wx_pixi = hx + (lx * cos_t - ly * sin_t)
+        wy_pixi = (-hz) + (lx * sin_t + ly * cos_t)
+
+        empty_obj.location = (wx_pixi, -0.120, -wy_pixi)
+        empty_obj.parent = arm_obj
+        empty_obj.parent_type = "BONE"
+        empty_obj.parent_bone = bone_name
+        bone_parent_matrix = (
+            arm_obj.matrix_world
+            @ pbone.matrix
+            @ mathutils.Matrix.Translation((0.0, pbone.bone.length, 0.0))
+        )
+        empty_obj.matrix_parent_inverse = bone_parent_matrix.inverted()
+        created_sockets.append(empty_obj)
+
+    bpy.context.view_layer.update()
+    return created_sockets
 
 
 def create_cutout_slots(arm_obj: bpy.types.Object) -> List[bpy.types.Object]:
@@ -506,13 +615,19 @@ def set_linear_fcurves(action: bpy.types.Action) -> None:
                             kp.interpolation = "LINEAR"
 
 
+def add_pose_marker(action: bpy.types.Action, name: str, frame: int) -> None:
+    marker = action.pose_markers.new(name=name)
+    marker.frame = int(frame)
+
+
 def author_actions(arm_obj: bpy.types.Object) -> None:
-    """Author 4 distinct Blender Actions: `Idle`, `Run`, `Jump`, and `WallSlide`."""
+    """Author 5 distinct Blender Actions: `Idle`, `Run`, `Jump`, `WallSlide`, and `Recoil`."""
     action_configs = {
         "Idle": {"frame_end": 48, "step": 6, "loop": True},
         "Run": {"frame_end": 24, "step": 3, "loop": True},
         "Jump": {"frame_end": 36, "step": 3, "loop": False},
         "WallSlide": {"frame_end": 36, "step": 4, "loop": True},
+        "Recoil": {"frame_end": 4, "step": 1, "loop": False},
     }
 
     pbones = arm_obj.pose.bones
@@ -523,6 +638,12 @@ def author_actions(arm_obj: bpy.types.Object) -> None:
         action["loop"] = bool(cfg["loop"])
         action["frame_end"] = int(cfg["frame_end"])
         assign_action_compatible(arm_obj, action)
+
+        if action_name == "Run":
+            add_pose_marker(action, "footstep_r", 6)
+            add_pose_marker(action, "footstep_l", 18)
+        elif action_name == "Jump":
+            add_pose_marker(action, "jump_launch", 3)
 
         frame_end = int(cfg["frame_end"])
         step = int(cfg["step"])
@@ -604,6 +725,14 @@ def author_actions(arm_obj: bpy.types.Object) -> None:
                 pbones["upper_arm_r"].rotation_euler = (0.0, 0.0, 0.10 * math.sin(phi))
                 pbones["forearm_r"].rotation_euler = (0.0, 0.0, -0.15)
 
+            elif action_name == "Recoil":
+                # Short upper-body additive kick impulse peaking at frame 1 and settling at frame 4
+                kick = math.sin(math.pi * t_norm)
+                pbones["torso"].rotation_euler = (0.0, 0.0, -0.09 * kick)
+                pbones["head"].rotation_euler = (0.0, 0.0, -0.06 * kick)
+                pbones["upper_arm_r"].rotation_euler = (0.0, 0.0, -0.14 * kick)
+                pbones["forearm_r"].rotation_euler = (0.0, 0.0, -0.10 * kick)
+
             for pbone in pbones:
                 pbone.keyframe_insert(data_path="location", frame=frame)
                 pbone.keyframe_insert(data_path="rotation_euler", frame=frame)
@@ -619,6 +748,7 @@ def main() -> None:
     print("[OrthoRig] Generating procedural demo operative in Blender...")
     setup_scene_and_ortho_camera()
     arm_obj = create_operative_armature()
+    create_socket_empties(arm_obj)
     create_cutout_slots(arm_obj)
     author_actions(arm_obj)
 

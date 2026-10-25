@@ -9,10 +9,14 @@ Usage:
 
 Responsibilities:
 1. Reads the armature (`OperativeRig`), bone-parented cutout mesh planes/materials,
-   custom IK properties (`ik_target`, `bend_dir`), and Blender Actions.
+   named `EMPTY` sockets, custom 2-Bone IK properties (`ik_target`, `ik_target_socket`,
+   `bend_dir`, `auto_flip_facing`, `ik_mix`), 1-Bone Look-At properties (`look_at_target`),
+   and Blender Actions (including `pose_markers` timeline events).
 2. Converts Blender 3D Z-up (X, Z) coordinates into PixiJS 2D Y-down (X, -Z)
    coordinates, using Blender's Y depth for `zIndex`.
-3. Validates the compiled output against `/schema/orthorig.schema.json`
+3. Automatically bakes a packed RGBA PNG spritesheet atlas (`*.atlas.png`) alongside
+   the `.orthorig.json` output and populates `atlasRegion` on each slot.
+4. Validates the compiled output against `/schema/orthorig.schema.json`
    (Draft 2020-12) and writes `operative.orthorig.json`.
 """
 
@@ -27,7 +31,13 @@ from typing import Any, Dict, List, Optional
 
 import bpy
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+THIS_DIR = Path(__file__).resolve().parent
+if str(THIS_DIR) not in sys.path:
+    sys.path.insert(0, str(THIS_DIR))
+
+from orthorig_spritesheet_baker import bake_slots_to_atlas  # noqa: E402
+
+PROJECT_ROOT = THIS_DIR.parent.parent
 SCHEMA_PATH = PROJECT_ROOT / "schema" / "orthorig.schema.json"
 DEFAULT_OUTPUT_PATH = (
     PROJECT_ROOT
@@ -149,7 +159,7 @@ def get_action_keyframe_frames(action: bpy.types.Action, default_end: int) -> Li
     return sorted(frames_set)
 
 
-def compile_blend_to_orthorig() -> Dict[str, Any]:
+def compile_blend_to_orthorig(atlas_output_path: Optional[Path] = None) -> Dict[str, Any]:
     scene = bpy.context.scene
     fps = float(scene.render.fps or 24)
 
@@ -185,7 +195,30 @@ def compile_blend_to_orthorig() -> Dict[str, Any]:
             }
         )
 
-    # 2. Extract Cutout Slot Meshes
+    # 2. Extract Named Socket Empties
+    socket_objs = [
+        o for o in bpy.data.objects if o.type == "EMPTY" and o.parent == arm_obj
+    ]
+    sockets_list: List[Dict[str, Any]] = []
+    for sock_obj in sorted(socket_objs, key=lambda o: o.name):
+        raw_name = str(sock_obj.get("socket_name", sock_obj.name))
+        if raw_name.startswith("socket_"):
+            raw_name = raw_name[len("socket_") :]
+        bone_name = str(sock_obj.get("bone_name", sock_obj.parent_bone))
+        sx = clean_float(float(sock_obj.get("socket_x", 0.0)), 4)
+        sy = clean_float(float(sock_obj.get("socket_y", 0.0)), 4)
+        srot = clean_float(float(sock_obj.get("socket_rotation", 0.0)), 5)
+        sockets_list.append(
+            {
+                "name": raw_name,
+                "bone": bone_name,
+                "x": sx,
+                "y": sy,
+                "rotation": srot,
+            }
+        )
+
+    # 3. Extract Cutout Slot Meshes
     mesh_objs = [
         o for o in bpy.data.objects if o.type == "MESH" and o.parent == arm_obj
     ]
@@ -219,8 +252,13 @@ def compile_blend_to_orthorig() -> Dict[str, Any]:
 
     slots_list.sort(key=lambda s: s["zIndex"])
 
-    # 3. Extract Custom 2-Bone IK Constraints from PoseBones
+    if atlas_output_path is not None:
+        bake_slots_to_atlas(slots_list, atlas_output_path, scale_factor=1, padding_px=4)
+
+    # 4. Extract Custom 2-Bone IK Constraints & 1-Bone Look-At Constraints from PoseBones
     ik_constraints: List[Dict[str, Any]] = []
+    look_at_constraints: List[Dict[str, Any]] = []
+
     for bname in bone_order:
         pbone = arm_obj.pose.bones[bname]
         if pbone.get("ik_role") == "upper" and pbone.get("ik_lower_bone"):
@@ -228,16 +266,40 @@ def compile_blend_to_orthorig() -> Dict[str, Any]:
             lower_bone = str(pbone["ik_lower_bone"])
             target = str(pbone.get("ik_target", "aim_cursor"))
             bend_dir = int(pbone.get("bend_dir", 1))
-            ik_constraints.append(
-                {
-                    "name": chain_name,
-                    "chain": [bname, lower_bone],
-                    "target": target,
-                    "bendDirection": 1 if bend_dir >= 0 else -1,
-                }
-            )
+            auto_flip = bool(pbone.get("auto_flip_facing", True))
+            mix_val = clean_float(float(pbone.get("ik_mix", 1.0)), 4)
+            constraint_entry: Dict[str, Any] = {
+                "name": chain_name,
+                "chain": [bname, lower_bone],
+                "target": target,
+                "bendDirection": 1 if bend_dir >= 0 else -1,
+                "autoFlipFacing": auto_flip,
+                "mix": mix_val,
+            }
+            if pbone.get("ik_target_socket"):
+                constraint_entry["targetSocket"] = str(pbone["ik_target_socket"])
+            ik_constraints.append(constraint_entry)
 
-    # 4. Sample Actions into Keyframe Tracks
+        if pbone.get("look_at_target"):
+            look_name = str(pbone.get("look_at_name", f"look_at_{bname}"))
+            look_target = str(pbone["look_at_target"])
+            look_mix = clean_float(float(pbone.get("look_at_mix", 1.0)), 4)
+            look_entry: Dict[str, Any] = {
+                "name": look_name,
+                "bone": bname,
+                "target": look_target,
+                "mix": look_mix,
+            }
+            if "look_at_min_angle" in pbone:
+                look_entry["minAngle"] = clean_float(float(pbone["look_at_min_angle"]), 4)
+            if "look_at_max_angle" in pbone:
+                look_entry["maxAngle"] = clean_float(float(pbone["look_at_max_angle"]), 4)
+            look_at_constraints.append(look_entry)
+
+    # Ensure primary auto-flipping IK constraints execute before secondary socket-tracking chains
+    ik_constraints.sort(key=lambda c: 0 if c.get("autoFlipFacing", True) else 1)
+
+    # 5. Sample Actions into Keyframe Tracks & Timeline Events
     arm_obj.data.pose_position = "POSE"
     animations: Dict[str, Any] = {}
 
@@ -245,7 +307,7 @@ def compile_blend_to_orthorig() -> Dict[str, Any]:
         frame_end = int(action.get("frame_end", round(action.frame_range[1])))
         if frame_end <= 0:
             frame_end = 24
-        loop = bool(action.get("loop", action.name != "Jump"))
+        loop = bool(action.get("loop", action.name not in ("Jump", "Recoil")))
         assign_action_compatible(arm_obj, action)
 
         key_frames = get_action_keyframe_frames(action, frame_end)
@@ -267,26 +329,46 @@ def compile_blend_to_orthorig() -> Dict[str, Any]:
                     }
                 )
 
-        animations[action.name] = {
+        events: List[Dict[str, Any]] = []
+        for marker in sorted(action.pose_markers, key=lambda m: m.frame):
+            events.append(
+                {
+                    "name": str(marker.name),
+                    "time": clean_float(marker.frame / fps, 5),
+                }
+            )
+
+        clip_entry: Dict[str, Any] = {
             "duration": clean_float(frame_end / fps, 5),
             "loop": loop,
             "tracks": tracks,
         }
+        if events:
+            clip_entry["events"] = events
+
+        animations[action.name] = clip_entry
 
     blend_name = Path(bpy.data.filepath).name if bpy.data.filepath else "operative_demo.blend"
 
-    return {
-        "meta": {
-            "version": "1.0.0",
-            "sourceFile": blend_name,
-            "fps": fps,
-            "coordinateSystem": "pixi-y-down",
-        },
+    meta_entry: Dict[str, Any] = {
+        "version": "1.0.0",
+        "sourceFile": blend_name,
+        "fps": fps,
+        "coordinateSystem": "pixi-y-down",
+    }
+    if atlas_output_path is not None:
+        meta_entry["atlasTexture"] = atlas_output_path.name
+
+    result: Dict[str, Any] = {
+        "meta": meta_entry,
         "bones": bones_list,
+        "sockets": sockets_list,
         "slots": slots_list,
         "ik_constraints": ik_constraints,
+        "look_at_constraints": look_at_constraints,
         "animations": animations,
     }
+    return result
 
 
 def validate_against_schema(data: Dict[str, Any], schema_path: Path) -> None:
@@ -320,6 +402,13 @@ def validate_against_schema(data: Dict[str, Any], schema_path: Path) -> None:
                 raise ValueError(f"Schema validation failed: bone missing '{k}'")
         bone_names.add(bone["name"])
 
+    for sock in data.get("sockets", []):
+        for k in ["name", "bone", "x", "y", "rotation"]:
+            if k not in sock:
+                raise ValueError(f"Schema validation failed: socket missing '{k}'")
+        if sock["bone"] not in bone_names:
+            raise ValueError(f"Schema validation failed: socket '{sock['name']}' references unknown bone '{sock['bone']}'")
+
     for slot in data["slots"]:
         for k in ["name", "bone", "shapeType", "width", "height", "colorHex", "offsetX", "offsetY", "zIndex"]:
             if k not in slot:
@@ -335,8 +424,15 @@ def validate_against_schema(data: Dict[str, Any], schema_path: Path) -> None:
         for k in ["name", "chain", "target", "bendDirection"]:
             if k not in ik:
                 raise ValueError(f"Schema validation failed: ik_constraint missing '{k}'")
-        if len(ik["chain"]) != 2 or ik[" bendDirection" if " bendDirection" in ik else "bendDirection"] not in (1, -1):
+        if len(ik["chain"]) != 2 or ik["bendDirection"] not in (1, -1):
             raise ValueError(f"Schema validation failed: invalid ik_constraint '{ik['name']}'")
+
+    for look in data.get("look_at_constraints", []):
+        for k in ["name", "bone", "target"]:
+            if k not in look:
+                raise ValueError(f"Schema validation failed: look_at_constraint missing '{k}'")
+        if look["bone"] not in bone_names:
+            raise ValueError(f"Schema validation failed: look_at_constraint '{look['name']}' references unknown bone")
 
     if not data["animations"]:
         raise ValueError("Schema validation failed: animations cannot be empty")
@@ -354,10 +450,20 @@ def parse_output_path() -> Path:
     return DEFAULT_OUTPUT_PATH
 
 
+def derive_atlas_path(json_out_path: Path) -> Path:
+    stem = json_out_path.name
+    if stem.endswith(".orthorig.json"):
+        base = stem[: -len(".orthorig.json")]
+    else:
+        base = json_out_path.stem
+    return json_out_path.parent / f"{base}.atlas.png"
+
+
 def main() -> None:
     out_path = parse_output_path()
-    print(f"[OrthoRig Compiler] Compiling active Blender file -> {out_path}")
-    payload = compile_blend_to_orthorig()
+    atlas_path = derive_atlas_path(out_path)
+    print(f"[OrthoRig Compiler] Compiling active Blender file -> {out_path} (atlas: {atlas_path.name})")
+    payload = compile_blend_to_orthorig(atlas_output_path=atlas_path)
     validate_against_schema(payload, SCHEMA_PATH)
     print(f"[OrthoRig Compiler] Validated output against schema: {SCHEMA_PATH}")
 
@@ -365,8 +471,10 @@ def main() -> None:
     out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     print(
         f"[OrthoRig Compiler] Wrote {out_path} "
-        f"({len(payload['bones'])} bones, {len(payload['slots'])} slots, "
-        f"{len(payload['ik_constraints'])} IK constraints, {len(payload['animations'])} actions)"
+        f"({len(payload['bones'])} bones, {len(payload.get('sockets', []))} sockets, "
+        f"{len(payload['slots'])} slots, {len(payload['ik_constraints'])} IK constraints, "
+        f"{len(payload.get('look_at_constraints', []))} Look-At constraints, "
+        f"{len(payload['animations'])} actions)"
     )
 
 

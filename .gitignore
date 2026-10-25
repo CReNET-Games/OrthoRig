@@ -2,5 +2,7 @@ node_modules/
 dist/
 *.log
 *.blend1
+__pycache__/
+*.pyc
 scancode-report.json
 .DS_Store
