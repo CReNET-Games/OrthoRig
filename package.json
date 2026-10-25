@@ -1,0 +1,35 @@
+{
+	"name": "orthorig-monorepo",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Open-source 2D orthographic skeletal animation compiler and Analytic IK runtime bridging Blender and PixiJS v8.",
+	"license": "MIT",
+	"type": "module",
+	"workspaces": [
+		"packages/runtime",
+		"examples/operative-mvp"
+	],
+	"scripts": {
+		"build:rig": "blender -b -P tools/blender/generate_demo_operative.py && blender -b examples/operative-mvp/assets/source/operative_demo.blend -P tools/blender/orthorig_compiler.py -- examples/operative-mvp/public/assets/operative.orthorig.json",
+		"build:runtime": "npm run build --workspace=@crenet/orthorig",
+		"build:demo": "npm run build --workspace=@crenet/operative-mvp",
+		"build": "npm run build:runtime && npm run build:demo",
+		"dev": "npm run dev --workspace=@crenet/operative-mvp",
+		"preview": "npm run preview --workspace=@crenet/operative-mvp",
+		"test": "vitest run",
+		"ip:check": "node tools/check_ip_compliance.mjs",
+		"lint": "biome check .",
+		"lint:fix": "biome check --write .",
+		"format": "biome format --write ."
+	},
+	"dependencies": {
+		"pixi.js": "^8.22.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.11",
+		"@types/node": "^26.6.4",
+		"typescript": "^6.0.3",
+		"vite": "^8.3.2",
+		"vitest": "^4.1.11"
+	}
+}

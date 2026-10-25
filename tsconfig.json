@@ -1,0 +1,25 @@
+{
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "ESNext",
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"types": ["node"],
+		"skipLibCheck": true,
+		"moduleResolution": "bundler",
+		"verbatimModuleSyntax": true,
+		"moduleDetection": "force",
+		"noEmit": true,
+		"erasableSyntaxOnly": true,
+		"strict": true,
+		"noFallthroughCasesInSwitch": true,
+		"resolveJsonModule": true,
+		"paths": {
+			"@crenet/orthorig": ["./packages/runtime/src/index.ts"]
+		}
+	},
+	"include": [
+		"packages/runtime/src/**/*.ts",
+		"examples/operative-mvp/src/**/*.ts",
+		"vitest.config.ts"
+	]
+}
