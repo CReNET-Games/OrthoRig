@@ -1,5 +1,11 @@
 import { OrthoRig, type OrthoRigSchema } from "@crenet/orthorig";
-import { Application, Container, Graphics } from "pixi.js";
+import {
+	Application,
+	Assets,
+	Container,
+	Graphics,
+	type Texture,
+} from "pixi.js";
 import {
 	buildArenaPlatforms,
 	drawReticle,
@@ -61,10 +67,20 @@ async function bootstrap(): Promise<void> {
 	});
 	host.appendChild(app.canvas);
 
-	const response = await fetch(
-		`${import.meta.env.BASE_URL}assets/operative.orthorig.json`,
-	);
+	const baseUrl = import.meta.env.BASE_URL;
+	const response = await fetch(`${baseUrl}assets/operative.orthorig.json`);
 	const schema = (await response.json()) as OrthoRigSchema;
+
+	let atlasTexture: Texture | undefined;
+	if (schema.meta.atlasTexture) {
+		try {
+			atlasTexture = await Assets.load<Texture>(
+				`${baseUrl}assets/${schema.meta.atlasTexture}`,
+			);
+		} catch {
+			atlasTexture = undefined;
+		}
+	}
 
 	const arenaLayer = new Graphics();
 	const fxLayer = new Graphics();
@@ -78,9 +94,22 @@ async function bootstrap(): Promise<void> {
 	const rig = new OrthoRig(schema, {
 		initialAnimation: "Idle",
 		debugDraw: true,
+		atlasTexture,
 	});
 	app.stage.addChild(rig);
 	app.stage.addChild(reticleGraphics);
+
+	// Demonstrate named socket child attachment (`muzzle` flash graphic mounted directly onto the socket)
+	const muzzleFlash = new Graphics();
+	muzzleFlash
+		.poly([0, -4, 14, 0, 0, 4], true)
+		.fill({ color: OPERATIVE_CYAN, alpha: 0.9 })
+		.stroke({ color: STARK_WHITE, width: 1 });
+	muzzleFlash.visible = false;
+	if (rig.getSocket("muzzle")) {
+		rig.attachToSocket("muzzle", muzzleFlash);
+	}
+	let muzzleFlashTimer = 0;
 
 	let platforms = buildArenaPlatforms(app.screen.width, app.screen.height);
 	renderArena(arenaLayer, app.screen.width, app.screen.height, platforms);
@@ -99,6 +128,7 @@ async function bootstrap(): Promise<void> {
 	let dashDir: -1 | 1 = 1;
 	let fireCooldown = 0;
 	let forcedAction: string | null = null;
+	let lastEventName = "none";
 
 	const input = new InputController(app.canvas, px + 180, py - 100);
 	const projectiles: Projectile[] = [];
@@ -125,9 +155,29 @@ async function bootstrap(): Promise<void> {
 		}
 	};
 
+	// Subscribe to timeline events (`footstep_r`, `footstep_l`, `jump_launch`)
+	rig.onAnimationEvent((ev) => {
+		lastEventName = `${ev.name} (${ev.action})`;
+		if (ev.name.startsWith("footstep")) {
+			spawnSparks(px, py - 2, STARK_WHITE, 4);
+		}
+	});
+
 	const fireProjectile = (): void => {
-		// Spawn projectile directly from the gun barrel (forearm_r tip) world transform
-		const barrel = rig.getBoneWorldTransform("forearm_r");
+		// Spawn projectile from the authored `muzzle` socket (falling back to forearm_r tip if absent)
+		const muzzleTf = rig.getSocket("muzzle")
+			? rig.getSocketWorldTransform("muzzle")
+			: (() => {
+					const b = rig.getBoneWorldTransform("forearm_r");
+					return {
+						x: b.tipX,
+						y: b.tipY,
+						rotation: b.rotation,
+						dirX: b.dirX,
+						dirY: b.dirY,
+					};
+				})();
+
 		const g = new Graphics();
 		g.moveTo(-10, 0)
 			.lineTo(10, 0)
@@ -136,20 +186,32 @@ async function bootstrap(): Promise<void> {
 			.lineTo(10, 0)
 			.stroke({ color: STARK_WHITE, width: 1.5, alpha: 1.0 });
 
-		g.position.set(barrel.tipX, barrel.tipY);
-		g.rotation = barrel.rotation;
+		g.position.set(muzzleTf.x, muzzleTf.y);
+		g.rotation = muzzleTf.rotation;
 		projectileLayer.addChild(g);
 
 		projectiles.push({
-			x: barrel.tipX,
-			y: barrel.tipY,
-			vx: barrel.dirX * PROJECTILE_SPEED,
-			vy: barrel.dirY * PROJECTILE_SPEED,
+			x: muzzleTf.x,
+			y: muzzleTf.y,
+			vx: muzzleTf.dirX * PROJECTILE_SPEED,
+			vy: muzzleTf.dirY * PROJECTILE_SPEED,
 			life: 1.5,
 			graphics: g,
 		});
 
-		spawnSparks(barrel.tipX, barrel.tipY, OPERATIVE_CYAN, 6);
+		muzzleFlash.visible = true;
+		muzzleFlashTimer = 0.045;
+		spawnSparks(muzzleTf.x, muzzleTf.y, OPERATIVE_CYAN, 6);
+
+		// Play additive upper-body Recoil kick on Layer 1 while locomotion continues on Layer 0
+		if (rig.schema.animations.Recoil) {
+			rig.playLayer(1, "Recoil", {
+				mode: "additive",
+				weight: 1.0,
+				loop: false,
+				forceRestart: true,
+			});
+		}
 	};
 
 	window.addEventListener("resize", () => {
@@ -164,6 +226,13 @@ async function bootstrap(): Promise<void> {
 
 	app.ticker.add((ticker) => {
 		const dt = Math.min(ticker.deltaMS / 1000, 0.05);
+
+		if (muzzleFlashTimer > 0) {
+			muzzleFlashTimer = Math.max(0, muzzleFlashTimer - dt);
+			if (muzzleFlashTimer <= 0) {
+				muzzleFlash.visible = false;
+			}
+		}
 
 		const currentFacing: 1 | -1 = rig.scale.x < 0 ? -1 : 1;
 		const sampled = input.sample(px, py - 100, currentFacing);
@@ -202,7 +271,10 @@ async function bootstrap(): Promise<void> {
 			dashTimer = DASH_DURATION;
 			dashCooldown = DASH_COOLDOWN;
 			vy = 0;
-			spawnSparks(px, py - 74, OPERATIVE_CYAN, 14);
+			const thrusterWorld = rig.getSocket("thruster")
+				? rig.getSocketWorldTransform("thruster")
+				: { x: px, y: py - 74 };
+			spawnSparks(thrusterWorld.x, thrusterWorld.y, OPERATIVE_CYAN, 14);
 		}
 
 		if (dashCooldown > 0) {
@@ -310,7 +382,7 @@ async function bootstrap(): Promise<void> {
 		rig.position.set(px, py);
 		rig.update(dt, aimTargetX, aimTargetY);
 
-		// Fire projectile (after IK update so barrel transform matches current frame's aim)
+		// Fire projectile (after IK update so muzzle socket transform matches current frame's aim)
 		if (sampled.shootJustPressed || (sampled.shootHeld && fireCooldown <= 0)) {
 			fireProjectile();
 			fireCooldown = FIRE_COOLDOWN;
@@ -370,7 +442,13 @@ async function bootstrap(): Promise<void> {
 		}
 
 		drawReticle(reticleGraphics, aimTargetX, aimTargetY);
-		updateTelemetryHud(telemetryEl, rig, projectiles.length, aimSource);
+		updateTelemetryHud(
+			telemetryEl,
+			rig,
+			projectiles.length,
+			aimSource,
+			lastEventName,
+		);
 	});
 }
 

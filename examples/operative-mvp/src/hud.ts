@@ -11,6 +11,24 @@ export function bindDebugHud(
 		debugBtn.textContent = `Skeleton Debug: ${rig.debugDraw ? "ON" : "OFF"}`;
 	});
 
+	let twoHandEnabled = true;
+	const gripBtn = document.getElementById("btn-grip-toggle");
+	gripBtn?.addEventListener("click", () => {
+		twoHandEnabled = !twoHandEnabled;
+		rig.setConstraintMix("left_arm_grip", twoHandEnabled ? 1.0 : 0.0);
+		gripBtn.classList.toggle("active", twoHandEnabled);
+		gripBtn.textContent = `2-Hand IK: ${twoHandEnabled ? "ON" : "OFF"}`;
+	});
+
+	let atlasEnabled = false;
+	const atlasBtn = document.getElementById("btn-atlas-toggle");
+	atlasBtn?.addEventListener("click", () => {
+		atlasEnabled = !atlasEnabled;
+		rig.setAtlasMode(atlasEnabled);
+		atlasBtn.classList.toggle("active", atlasEnabled);
+		atlasBtn.textContent = `Atlas Mode: ${atlasEnabled ? "ON" : "OFF"}`;
+	});
+
 	const speedSlider = document.getElementById(
 		"slider-speed",
 	) as HTMLInputElement | null;
@@ -52,13 +70,15 @@ export function updateTelemetryHud(
 	rig: OrthoRig,
 	activeProjectiles: number,
 	aimSource: "mouse" | "gamepad" = "mouse",
+	lastEventName: string = "none",
 ): void {
 	if (!telemetryEl || !rig.ikResult) return;
 	const aimDeg = ((rig.ikResult.aimWorldAngle * 180) / Math.PI).toFixed(1);
+	const gripMix = rig.getConstraintMix("left_arm_grip").toFixed(1);
 	telemetryEl.innerHTML = [
 		`ACTION: <b>${rig.activeAction}</b> (${rig.playbackTime.toFixed(2)}s @ ${rig.animationSpeed.toFixed(2)}x)`,
-		`FACING: <b>scale.x = ${rig.scale.x}</b> | BEND: <b>${rig.ikResult.effectiveBendDirection}</b>`,
+		`FACING: <b>scale.x = ${rig.scale.x}</b> | GRIP MIX: <b>${gripMix}</b>`,
 		`AIM: <b>${aimDeg}° (${aimSource.toUpperCase()})</b> | SHOTS: <b>${activeProjectiles}</b>`,
-		`UPPER_ARM_R: <b>${rig.ikResult.upperLocalRotation.toFixed(2)} rad</b> | FOREARM_R: <b>${rig.ikResult.lowerLocalRotation.toFixed(2)} rad</b>`,
+		`EVENT: <b>${lastEventName}</b>`,
 	].join("<br/>");
 }
