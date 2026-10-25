@@ -1,8 +1,29 @@
 {
 	"name": "@crenet/orthorig",
-	"version": "0.1.0",
+	"version": "0.0.1",
 	"description": "MIT-licensed 2D orthographic skeletal animation and Analytic 2-Bone IK runtime for PixiJS v8.",
+	"keywords": [
+		"pixijs",
+		"skeletal-animation",
+		"inverse-kinematics",
+		"2d-animation",
+		"blender",
+		"gamedev"
+	],
+	"homepage": "https://crenet-games.github.io/OrthoRig/",
+	"bugs": {
+		"url": "https://github.com/CReNET-Games/OrthoRig/issues"
+	},
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/CReNET-Games/OrthoRig.git",
+		"directory": "packages/runtime"
+	},
 	"license": "MIT",
+	"author": "Emmanuel Abarca Jimenez <efaj@crenet.games> (https://crenet.games/emmanuel)",
+	"publishConfig": {
+		"access": "public"
+	},
 	"type": "module",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",

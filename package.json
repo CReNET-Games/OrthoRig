@@ -1,6 +1,6 @@
 {
 	"name": "orthorig-monorepo",
-	"version": "0.1.0",
+	"version": "0.0.1",
 	"private": true,
 	"description": "Open-source 2D orthographic skeletal animation compiler and Analytic IK runtime bridging Blender and PixiJS v8.",
 	"license": "MIT",

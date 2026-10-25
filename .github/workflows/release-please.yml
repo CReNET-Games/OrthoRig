@@ -17,7 +17,64 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: release-please-oss/release-please-action@v6
         id: release
         with:
           release-type: node
+          config-overrides-json: >-
+            {
+              "bump-minor-pre-major": true,
+              "initial-version": "0.1.0",
+              "extra-files": [
+                {
+                  "type": "json",
+                  "path": "packages/runtime/package.json",
+                  "jsonpath": "$.version"
+                },
+                {
+                  "type": "json",
+                  "path": "package-lock.json",
+                  "jsonpath": "$.packages['packages/runtime'].version"
+                }
+              ]
+            }
+
+      # Checkout and setup Node.js for publishing (runs for both Canary and Release)
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Upgrade NPM for OIDC support
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Copy README and LICENSE to runtime package
+        run: cp README.md LICENSE packages/runtime/
+
+      # --- CANARY PUBLISH STEPS ---
+      - name: Update version with SHA (Canary)
+        if: ${{ !steps.release.outputs.release_created }}
+        run: |
+          VERSION=$(node -p "require('./packages/runtime/package.json').version")
+          SHORT_SHA=${GITHUB_SHA::7}
+          npm version "$VERSION-$SHORT_SHA" --workspace=@crenet/orthorig --no-git-tag-version
+
+      - name: Publish to NPM (Canary)
+        if: ${{ !steps.release.outputs.release_created }}
+        run: npm publish --workspace=@crenet/orthorig --access public --provenance --tag canary
+
+      # --- STABLE RELEASE STEPS ---
+      - name: Publish to NPM (Release)
+        if: ${{ steps.release.outputs.release_created }}
+        run: npm publish --workspace=@crenet/orthorig --access public --provenance
+
