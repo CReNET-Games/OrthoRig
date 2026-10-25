@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/CReNET-Games/OrthoRig/actions/workflows/ci.yml/badge.svg)](https://github.com/CReNET-Games/OrthoRig/actions/workflows/ci.yml)
 [![IP & Similarity Scan](https://github.com/CReNET-Games/OrthoRig/actions/workflows/ip-check.yml/badge.svg)](https://github.com/CReNET-Games/OrthoRig/actions/workflows/ip-check.yml)
-[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FCReNET-Games%2FOrthoRig.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FCReNET-Games%2FOrthoRig?ref=badge_shield)
+[![FOSSA Status](https://app.fossa.com/api/projects/custom%2B63939%2Fgithub.com%2FCReNET-Games%2FOrthoRig.svg?type=shield)](https://app.fossa.com/projects/custom%2B63939%2Fgithub.com%2FCReNET-Games%2FOrthoRig?ref=badge_shield)
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 
 An open-source, MIT-licensed 2D orthographic skeletal animation compiler and **Analytic 2-Bone Inverse Kinematics (IK)** runtime bridging **Blender** (`bpy`) and **PixiJS v8** (TypeScript).
