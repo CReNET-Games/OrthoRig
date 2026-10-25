@@ -30,13 +30,14 @@ export function createSlotAttachment(
 	slot: OrthoSlotSpec,
 	textures?: Record<string, Texture>,
 	atlasTexture?: Texture,
+	preferAtlasSprites: boolean = false,
 ): Graphics | Sprite {
 	const explicitTex = textures?.[slot.name];
-	if (
-		slot.shapeType === "sprite" ||
-		explicitTex ||
-		(slot.atlasRegion && atlasTexture)
-	) {
+	const useAtlasRegion =
+		Boolean(slot.atlasRegion && atlasTexture) &&
+		(slot.shapeType === "sprite" || preferAtlasSprites);
+
+	if (slot.shapeType === "sprite" || explicitTex || useAtlasRegion) {
 		let tex = explicitTex ?? Texture.WHITE;
 		if (!explicitTex && slot.atlasRegion && atlasTexture) {
 			tex = new Texture({
