@@ -57,7 +57,7 @@ export interface OrthoIKConstraintSpec {
 	/** Optional named socket whose world position acts as the default target when no explicit world target is set. */
 	targetSocket?: string;
 	bendDirection: 1 | -1;
-	/** Whether this IK chain automatically flips the rig's horizontal facing (`scale.x = 1 | -1`) when the target crosses X=0 (defaults to `true`). */
+	/** Whether this IK chain automatically flips the rig's horizontal facing (`scale.x = ±|scale.x|`) when the target crosses X=0 (defaults to `true`). */
 	autoFlipFacing?: boolean;
 	/** FK-to-IK blend weight in `[0, 1]` (`1.0` = full IK, `0.0` = pure FK animation). Defaults to `1.0`. */
 	mix?: number;
@@ -129,11 +129,11 @@ export interface IKSolveResult {
 	midLocal: { x: number; y: number };
 	/** Chain end-effector tip (e.g. wrist or ankle) in local character space. */
 	endLocal: { x: number; y: number };
-	/** Chain root joint in world/stage space. */
+	/** Chain root joint in parent/world space. */
 	rootWorld: { x: number; y: number };
-	/** Chain middle joint in world/stage space. */
+	/** Chain middle joint in parent/world space. */
 	midWorld: { x: number; y: number };
-	/** Chain end-effector tip in world/stage space. */
+	/** Chain end-effector tip in parent/world space. */
 	endWorld: { x: number; y: number };
 	/** Alias for `rootLocal` (shoulder/hip). */
 	shoulderLocal: { x: number; y: number };
@@ -206,6 +206,8 @@ export interface OrthoLayerPlayOptions {
 }
 
 export interface OrthoRigOptions {
+	/** Optional uniform scale factor applied to the schema geometry (`bones`, `sockets`, `slots`, `animations`) on construction. */
+	scale?: number;
 	/** Optional dictionary of loaded textures or shared atlas texture for `"sprite"` slots. */
 	textures?: Record<string, Texture>;
 	/** Optional shared atlas texture used when `slot.atlasRegion` is present. */
@@ -216,4 +218,25 @@ export interface OrthoRigOptions {
 	initialAnimation?: string;
 	/** Whether to render the real-time neon green/magenta skeleton & IK debug overlay. */
 	debugDraw?: boolean;
+}
+
+export interface OrthoRigBundleLoadOptions {
+	/** Optional uniform scale factor applied to the loaded schema via `scaleOrthoRigSchema`. */
+	scale?: number;
+	/** Whether to automatically load `schema.meta.atlasTexture` via PixiJS `Assets.load` (default `true`). */
+	loadAtlas?: boolean;
+	/** Optional explicit URL override for the atlas texture. */
+	atlasUrl?: string;
+	/** If `true`, rethrows errors when loading `meta.atlasTexture` fails instead of falling back to `undefined` (default `false`). */
+	strictAtlas?: boolean;
+	/** Custom `fetch` implementation (defaults to `globalThis.fetch`). */
+	fetch?: typeof globalThis.fetch;
+	/** Custom texture loader implementation (defaults to `(url) => Assets.load<Texture>(url)`). */
+	loadTexture?: (url: string) => Promise<Texture>;
+}
+
+export interface OrthoRigLoadedBundle {
+	schema: OrthoRigSchema;
+	atlasTexture?: Texture;
+	atlasUrl?: string;
 }

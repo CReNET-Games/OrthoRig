@@ -1,19 +1,24 @@
-export { drawDebugSkeletonOverlay } from "./debugOverlay";
+export { drawDebugSkeletonOverlay } from "./debugOverlay.js";
 export {
 	type LookAtSolveParams,
 	solveLookAtConstraint,
 	solveTwoBoneChain,
 	type TwoBoneSolveParams,
-} from "./ikSolver";
+} from "./ikSolver.js";
 export {
 	clamp,
 	evaluateCubicBezier,
 	interpolateTrack,
 	normalizeAngle,
 	parseHexColor,
-} from "./math";
-export { OrthoRig } from "./OrthoRig";
-export { createSlotAttachment, drawProceduralSlot } from "./slotBuilder";
+	scaleOrthoRigSchema,
+} from "./math.js";
+export {
+	loadOrthoRigAssets,
+	loadOrthoRigBundle,
+	OrthoRig,
+} from "./OrthoRig.js";
+export { createSlotAttachment, drawProceduralSlot } from "./slotBuilder.js";
 export type {
 	BoneWorldTransform,
 	IKSolveResult,
@@ -28,6 +33,8 @@ export type {
 	OrthoKeyframe,
 	OrthoLayerPlayOptions,
 	OrthoLookAtConstraintSpec,
+	OrthoRigBundleLoadOptions,
+	OrthoRigLoadedBundle,
 	OrthoRigMeta,
 	OrthoRigOptions,
 	OrthoRigSchema,
@@ -36,4 +43,4 @@ export type {
 	OrthoSocketSpec,
 	OrthoTimelineEventSpec,
 	SocketWorldTransform,
-} from "./types";
+} from "./types.js";

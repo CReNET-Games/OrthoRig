@@ -1,14 +1,21 @@
-import { Container, Graphics, type Sprite, type Texture } from "pixi.js";
-import { drawDebugSkeletonOverlay } from "./debugOverlay";
-import { solveLookAtConstraint, solveTwoBoneChain } from "./ikSolver";
+import {
+	Assets,
+	Container,
+	Graphics,
+	type Sprite,
+	type Texture,
+} from "pixi.js";
+import { drawDebugSkeletonOverlay } from "./debugOverlay.js";
+import { solveLookAtConstraint, solveTwoBoneChain } from "./ikSolver.js";
 import {
 	clamp,
 	evaluateCubicBezier,
 	interpolateTrack,
 	normalizeAngle,
 	parseHexColor,
-} from "./math";
-import { createSlotAttachment } from "./slotBuilder";
+	scaleOrthoRigSchema,
+} from "./math.js";
+import { createSlotAttachment } from "./slotBuilder.js";
 import type {
 	BoneWorldTransform,
 	IKSolveResult,
@@ -18,19 +25,22 @@ import type {
 	OrthoBoneNode,
 	OrthoKeyframe,
 	OrthoLayerPlayOptions,
+	OrthoRigBundleLoadOptions,
+	OrthoRigLoadedBundle,
 	OrthoRigOptions,
 	OrthoRigSchema,
 	OrthoSocketNode,
 	SocketWorldTransform,
-} from "./types";
+} from "./types.js";
 
-export type * from "./types";
+export type * from "./types.js";
 export {
 	clamp,
 	evaluateCubicBezier,
 	interpolateTrack,
 	normalizeAngle,
 	parseHexColor,
+	scaleOrthoRigSchema,
 };
 
 interface AnimationLayerState {
@@ -51,6 +61,67 @@ interface AnimationLayerState {
 }
 
 /**
+ * Fetch a compiled `.orthorig.json` schema from `schemaUrl`, optionally scale its spatial geometry,
+ * and automatically load its sibling `meta.atlasTexture` PNG via PixiJS `Assets.load`.
+ */
+export async function loadOrthoRigBundle(
+	schemaUrl: string,
+	options: OrthoRigBundleLoadOptions = {},
+): Promise<OrthoRigLoadedBundle> {
+	const fetchFn = options.fetch ?? globalThis.fetch;
+	const res = await fetchFn(schemaUrl);
+	if (!res.ok) {
+		throw new Error(
+			`[@crenet/orthorig] Failed to load schema from "${schemaUrl}" (HTTP ${res.status})`,
+		);
+	}
+	const rawSchema = (await res.json()) as OrthoRigSchema;
+	const schema =
+		typeof options.scale === "number" && options.scale !== 1
+			? scaleOrthoRigSchema(rawSchema, options.scale)
+			: rawSchema;
+
+	let atlasTexture: Texture | undefined;
+	let atlasUrl: string | undefined;
+
+	if (
+		options.loadAtlas !== false &&
+		(options.atlasUrl || schema.meta?.atlasTexture)
+	) {
+		const rawAtlasPath = options.atlasUrl ?? schema.meta.atlasTexture!;
+		if (/^(https?:|data:|blob:|\/)/.test(rawAtlasPath)) {
+			atlasUrl = rawAtlasPath;
+		} else {
+			const slashIdx = schemaUrl.lastIndexOf("/");
+			const baseDir = slashIdx >= 0 ? schemaUrl.slice(0, slashIdx + 1) : "";
+			atlasUrl = `${baseDir}${rawAtlasPath}`;
+		}
+
+		const loadTextureFn =
+			options.loadTexture ?? ((url: string) => Assets.load<Texture>(url));
+		try {
+			atlasTexture = await loadTextureFn(atlasUrl);
+		} catch (err) {
+			if (options.strictAtlas) {
+				throw err;
+			}
+			atlasTexture = undefined;
+		}
+	}
+
+	return {
+		schema,
+		atlasTexture,
+		atlasUrl,
+	};
+}
+
+/**
+ * Alias for `loadOrthoRigBundle`.
+ */
+export const loadOrthoRigAssets = loadOrthoRigBundle;
+
+/**
  * `@crenet/orthorig` — 2D Orthographic Skeletal Animation & Analytic 2-Bone IK Runtime for PixiJS v8.
  */
 export class OrthoRig extends Container {
@@ -64,6 +135,7 @@ export class OrthoRig extends Container {
 	/** Animation playback speed multiplier (`1.0` = normal speed, `0.0` = paused). */
 	public animationSpeed: number = 1.0;
 
+	private _facing: 1 | -1 = 1;
 	private _debugDraw: boolean = false;
 	private readonly debugGraphics: Graphics;
 	private slotTextures?: Record<string, Texture>;
@@ -93,7 +165,7 @@ export class OrthoRig extends Container {
 	// IK targets keyed by constraint target name (e.g. `"aim_cursor"`, `"foot_l_ground"`, etc.)
 	private readonly ikTargetsWorld: Map<
 		string,
-		{ x: number; y: number; mix?: number }
+		{ x: number; y: number; mix?: number; facingOverride?: 1 | -1 }
 	> = new Map();
 	private readonly constraintMixOverrides: Map<string, number> = new Map();
 	private readonly ikResults: Map<string, IKSolveResult> = new Map();
@@ -103,7 +175,10 @@ export class OrthoRig extends Container {
 
 	constructor(schema: OrthoRigSchema, options: OrthoRigOptions = {}) {
 		super();
-		this.schema = schema;
+		this.schema =
+			typeof options.scale === "number" && options.scale !== 1
+				? scaleOrthoRigSchema(schema, options.scale)
+				: schema;
 		this.label = "OrthoRig";
 		this.sortableChildren = true;
 		this.slotTextures = options.textures;
@@ -127,10 +202,67 @@ export class OrthoRig extends Container {
 
 		const defaultAction =
 			options.initialAnimation ??
-			(schema.animations.Idle ? "Idle" : Object.keys(schema.animations)[0]);
-		if (defaultAction && schema.animations[defaultAction]) {
+			(this.schema.animations.Idle
+				? "Idle"
+				: Object.keys(this.schema.animations)[0]);
+		if (defaultAction && this.schema.animations[defaultAction]) {
 			this.play(defaultAction, 0);
 		}
+	}
+
+	/**
+	 * Static helper to load a `.orthorig.json` schema and its sibling `.atlas.png` texture.
+	 */
+	public static loadBundle(
+		schemaUrl: string,
+		options?: OrthoRigBundleLoadOptions,
+	): Promise<OrthoRigLoadedBundle> {
+		return loadOrthoRigBundle(schemaUrl, options);
+	}
+
+	/**
+	 * Static helper to load a `.orthorig.json` bundle from `schemaUrl` and instantiate an `OrthoRig` in one call.
+	 */
+	public static async fromUrl(
+		schemaUrl: string,
+		options: OrthoRigOptions & OrthoRigBundleLoadOptions = {},
+	): Promise<OrthoRig> {
+		const bundle = await loadOrthoRigBundle(schemaUrl, options);
+		const resolvedAtlas = options.atlasTexture ?? bundle.atlasTexture;
+		return new OrthoRig(bundle.schema, {
+			...options,
+			scale: undefined,
+			atlasTexture: resolvedAtlas,
+			preferAtlasSprites: options.preferAtlasSprites ?? Boolean(resolvedAtlas),
+		});
+	}
+
+	/**
+	 * Alias for `OrthoRig.fromUrl`.
+	 */
+	public static load(
+		schemaUrl: string,
+		options?: OrthoRigOptions & OrthoRigBundleLoadOptions,
+	): Promise<OrthoRig> {
+		return OrthoRig.fromUrl(schemaUrl, options);
+	}
+
+	/**
+	 * Current horizontal facing (`1` = right, `-1` = left), independent of `|this.scale.x|`.
+	 * Setting `rig.facing` flips `this.scale.x`'s sign while preserving `Math.abs(this.scale.x)`.
+	 */
+	public get facing(): 1 | -1 {
+		if (Math.abs(this.scale.x) > 1e-9) {
+			return this.scale.x < 0 ? -1 : 1;
+		}
+		return this._facing;
+	}
+
+	public set facing(dir: 1 | -1) {
+		const sign: 1 | -1 = dir < 0 ? -1 : 1;
+		this._facing = sign;
+		const absScaleX = Math.abs(this.scale.x) || 1;
+		this.scale.x = sign * absScaleX;
 	}
 
 	/**
@@ -329,30 +461,92 @@ export class OrthoRig extends Container {
 	}
 
 	/**
-	 * Compute a named socket's world/stage transform (`x`, `y`, `rotation`, unit direction `dirX`/`dirY`, and `scaleX`).
+	 * Transform a point from this rig's unscaled local character space through the PixiJS scene graph
+	 * up to `relativeTo` (or up to the root stage/world space when `relativeTo` is omitted).
 	 */
-	public getSocketWorldTransform(socketName: string): SocketWorldTransform {
-		const localTf = this.getSocketLocalCharacterTransform(socketName);
-		const sx = this.scale.x;
-		const sy = this.scale.y;
-		const scaleX: 1 | -1 = sx < 0 ? -1 : 1;
+	private transformLocalPointToSpace(
+		localX: number,
+		localY: number,
+		relativeTo?: Container,
+	): { x: number; y: number } {
+		let x = localX;
+		let y = localY;
+		let curr: Container | null = this;
 
-		const worldX = this.x + localTf.x * sx;
-		const worldY = this.y + localTf.y * sy;
-		const dirX = Math.cos(localTf.rotation) * sx;
-		const dirY = Math.sin(localTf.rotation) * sy;
+		while (curr && curr !== relativeTo) {
+			const sx = curr.scale?.x ?? 1;
+			const sy = curr.scale?.y ?? 1;
+			const rot = curr.rotation ?? 0;
+			const cosR = Math.cos(rot);
+			const sinR = Math.sin(rot);
+			const scaledX = x * sx;
+			const scaledY = y * sy;
+			x = (curr.x ?? 0) + scaledX * cosR - scaledY * sinR;
+			y = (curr.y ?? 0) + scaledX * sinR + scaledY * cosR;
+			curr = curr.parent ?? null;
+		}
+
+		// If relativeTo was specified and is not a direct ancestor of this rig, transform from global space down into relativeTo
+		if (relativeTo && curr !== relativeTo) {
+			const targetChain: Container[] = [];
+			let node: Container | null = relativeTo;
+			while (node) {
+				targetChain.push(node);
+				node = node.parent ?? null;
+			}
+			targetChain.reverse();
+			for (const ancestor of targetChain) {
+				const dx = x - (ancestor.x ?? 0);
+				const dy = y - (ancestor.y ?? 0);
+				const rot = ancestor.rotation ?? 0;
+				const cosR = Math.cos(-rot);
+				const sinR = Math.sin(-rot);
+				const rx = dx * cosR - dy * sinR;
+				const ry = dx * sinR + dy * cosR;
+				const sx = ancestor.scale?.x || 1;
+				const sy = ancestor.scale?.y || 1;
+				x = rx / sx;
+				y = ry / sy;
+			}
+		}
+
+		return { x, y };
+	}
+
+	/**
+	 * Compute a named socket's world/stage transform (or transform in `relativeTo` container space),
+	 * including `x`, `y`, `rotation`, unit direction `dirX`/`dirY`, and `scaleX`.
+	 */
+	public getSocketWorldTransform(
+		socketName: string,
+		relativeTo?: Container,
+	): SocketWorldTransform {
+		const localTf = this.getSocketLocalCharacterTransform(socketName);
+		const origin = this.transformLocalPointToSpace(
+			localTf.x,
+			localTf.y,
+			relativeTo,
+		);
+		const tip = this.transformLocalPointToSpace(
+			localTf.x + Math.cos(localTf.rotation),
+			localTf.y + Math.sin(localTf.rotation),
+			relativeTo,
+		);
+
+		const dirX = tip.x - origin.x;
+		const dirY = tip.y - origin.y;
 		const len = Math.hypot(dirX, dirY) || 1;
 		const ndx = dirX / len;
 		const ndy = dirY / len;
 		const rotation = Math.atan2(ndy, ndx);
 
 		return {
-			x: worldX,
-			y: worldY,
+			x: origin.x,
+			y: origin.y,
 			rotation,
 			dirX: ndx,
 			dirY: ndy,
-			scaleX,
+			scaleX: this.facing,
 		};
 	}
 
@@ -537,7 +731,7 @@ export class OrthoRig extends Container {
 	}
 
 	/**
-	 * Set the world/stage target coordinates (and optional FK-to-IK `mix` in `[0, 1]`) for an IK target name.
+	 * Set the world/parent target coordinates (and optional FK-to-IK `mix` in `[0, 1]`) for an IK target name.
 	 */
 	public setIKTarget(
 		worldX: number,
@@ -550,7 +744,91 @@ export class OrthoRig extends Container {
 			x: worldX,
 			y: worldY,
 			mix: typeof mix === "number" ? clamp(mix, 0, 1) : prev?.mix,
+			facingOverride: undefined,
 		});
+	}
+
+	/**
+	 * Project an IK target ray from the constraint's root bone (e.g. shoulder `upper_arm_r`) along `angleRadians`
+	 * with a `1e-4` vertical deadzone on `Math.cos(angleRadians)` so aiming straight up/down (`±PI/2`)
+	 * preserves `fallbackFacing` (or current `this.facing`) without floating-point sign jitter.
+	 */
+	public setIKTargetAngle(
+		angleRadians: number,
+		targetName: string = "aim_cursor",
+		distance: number = 1000,
+		fallbackFacing?: 1 | -1,
+		mix?: number,
+	): { x: number; y: number } {
+		const cosA = Math.cos(angleRadians);
+		const sinA = Math.sin(angleRadians);
+		const constraint =
+			this.schema.ik_constraints.find((c) => c.target === targetName) ??
+			this.schema.ik_constraints[0];
+		const autoFlip = constraint?.autoFlipFacing ?? true;
+
+		let effectiveFacing: 1 | -1 = this.facing;
+		if (autoFlip) {
+			if (Math.abs(cosA) <= 1e-4) {
+				if (fallbackFacing === 1 || fallbackFacing === -1) {
+					effectiveFacing = fallbackFacing;
+				}
+			} else {
+				effectiveFacing = cosA < 0 ? -1 : 1;
+			}
+			this.facing = effectiveFacing;
+		}
+
+		const upperBoneName = constraint?.chain[0] ?? "upper_arm_r";
+		const rootLocal = this.boneNodes.has(upperBoneName)
+			? this.getBoneLocalCharacterTransform(upperBoneName)
+			: { x: 0, y: 0 };
+
+		const rootParentX = this.x + rootLocal.x * this.scale.x;
+		const rootParentY = this.y + rootLocal.y * this.scale.y;
+		const dirX = Math.abs(cosA) <= 1e-4 ? 0 : cosA;
+		const targetX = rootParentX + dirX * distance;
+		const targetY = rootParentY + sinA * distance;
+
+		const prev = this.ikTargetsWorld.get(targetName);
+		this.ikTargetsWorld.set(targetName, {
+			x: targetX,
+			y: targetY,
+			mix: typeof mix === "number" ? clamp(mix, 0, 1) : prev?.mix,
+			facingOverride: effectiveFacing,
+		});
+
+		return { x: targetX, y: targetY };
+	}
+
+	/**
+	 * Convenience helper to set the primary `"aim_cursor"` IK direction from an angle in radians.
+	 */
+	public setAimDirection(
+		angleRadians: number,
+		fallbackFacing?: 1 | -1,
+		distance: number = 1000,
+	): { x: number; y: number } {
+		return this.setIKTargetAngle(
+			angleRadians,
+			"aim_cursor",
+			distance,
+			fallbackFacing,
+		);
+	}
+
+	/**
+	 * Advance animations and solve 360° Analytic 2-Bone IK + 1-Bone Look-At toward an `aimAngleRadians`
+	 * ray (with automatic `1e-4` vertical deadzone and `fallbackFacing` preservation) in a single call.
+	 */
+	public updateWithAimAngle(
+		deltaSeconds: number,
+		aimAngleRadians: number,
+		fallbackFacing?: 1 | -1,
+		distance: number = 1000,
+	): void {
+		this.setAimDirection(aimAngleRadians, fallbackFacing, distance);
+		this.update(deltaSeconds);
 	}
 
 	/**
@@ -626,6 +904,7 @@ export class OrthoRig extends Container {
 				x: primaryTargetWorldX,
 				y: primaryTargetWorldY,
 				mix: prev?.mix,
+				facingOverride: undefined,
 			});
 		}
 
@@ -874,10 +1153,13 @@ export class OrthoRig extends Container {
 	}
 
 	/**
-	 * Compute a bone's world/stage transform (head position, tip position, world angle, and unit direction),
-	 * suitable for spawning projectiles or attaching effects at a bone tip.
+	 * Compute a bone's world/stage transform (or transform in `relativeTo` container space),
+	 * including head position, tip position, world angle, and unit direction.
 	 */
-	public getBoneWorldTransform(boneName: string): BoneWorldTransform {
+	public getBoneWorldTransform(
+		boneName: string,
+		relativeTo?: Container,
+	): BoneWorldTransform {
 		const node = this.boneNodes.get(boneName);
 		if (!node) {
 			throw new Error(`[@crenet/orthorig] Unknown bone "${boneName}"`);
@@ -886,25 +1168,28 @@ export class OrthoRig extends Container {
 		const localTipX = localTf.x + node.spec.length * Math.cos(localTf.rotation);
 		const localTipY = localTf.y + node.spec.length * Math.sin(localTf.rotation);
 
-		const sx = this.scale.x;
-		const sy = this.scale.y;
+		const head = this.transformLocalPointToSpace(
+			localTf.x,
+			localTf.y,
+			relativeTo,
+		);
+		const tip = this.transformLocalPointToSpace(
+			localTipX,
+			localTipY,
+			relativeTo,
+		);
 
-		const worldX = this.x + localTf.x * sx;
-		const worldY = this.y + localTf.y * sy;
-		const worldTipX = this.x + localTipX * sx;
-		const worldTipY = this.y + localTipY * sy;
-
-		const dx = worldTipX - worldX;
-		const dy = worldTipY - worldY;
+		const dx = tip.x - head.x;
+		const dy = tip.y - head.y;
 		const len = Math.hypot(dx, dy) || 1;
 		const rotation = Math.atan2(dy, dx);
 
 		return {
-			x: worldX,
-			y: worldY,
+			x: head.x,
+			y: head.y,
 			rotation,
-			tipX: worldTipX,
-			tipY: worldTipY,
+			tipX: tip.x,
+			tipY: tip.y,
 			dirX: dx / len,
 			dirY: dy / len,
 		};
@@ -921,11 +1206,13 @@ export class OrthoRig extends Container {
 				constraint.targetSocket &&
 				this.socketNodes.has(constraint.targetSocket)
 			) {
-				const socketWorld = this.getSocketWorldTransform(
+				// Evaluate targetSocket in this.parent space so it matches this.x / this.y
+				const socketParentTf = this.getSocketWorldTransform(
 					constraint.targetSocket,
+					this.parent ?? undefined,
 				);
-				targetX = socketWorld.x;
-				targetY = socketWorld.y;
+				targetX = socketParentTf.x;
+				targetY = socketParentTf.y;
 			}
 
 			if (typeof targetX !== "number" || typeof targetY !== "number") {
@@ -943,6 +1230,13 @@ export class OrthoRig extends Container {
 				continue;
 			}
 
+			if (
+				(constraint.autoFlipFacing ?? true) &&
+				explicitTarget?.facingOverride
+			) {
+				this.facing = explicitTarget.facingOverride;
+			}
+
 			this.solveTwoBoneIK(
 				targetX,
 				targetY,
@@ -950,7 +1244,9 @@ export class OrthoRig extends Container {
 				constraint.chain[1],
 				constraint.bendDirection,
 				constraint.name,
-				constraint.autoFlipFacing ?? true,
+				explicitTarget?.facingOverride
+					? false
+					: (constraint.autoFlipFacing ?? true),
 				mix,
 			);
 		}
@@ -979,7 +1275,7 @@ export class OrthoRig extends Container {
 				if (!boneNode) continue;
 
 				const boneTf = this.getBoneLocalCharacterTransform(lookSpec.bone);
-				const currentFacing: 1 | -1 = this.scale.x < 0 ? -1 : 1;
+				const currentFacing: 1 | -1 = this.facing;
 				const lookResult = solveLookAtConstraint({
 					constraintName: lookSpec.name,
 					boneName: lookSpec.bone,
@@ -990,6 +1286,7 @@ export class OrthoRig extends Container {
 					fkLocalRotation: boneNode.container.rotation,
 					rigWorldX: this.x,
 					rigWorldY: this.y,
+					rigScaleX: Math.abs(this.scale.x) || 1,
 					rigScaleY: this.scale.y,
 					currentFacing,
 					targetWorldX: target.x,
@@ -1009,7 +1306,7 @@ export class OrthoRig extends Container {
 	 *
 	 * Solves any 2-bone chain (`[upperBoneName, lowerBoneName]`) toward `(targetWorldX, targetWorldY)`.
 	 * Set `autoFlipFacing = false` for non-aim chains (such as foot/terrain IK or off-hand grips)
-	 * that should preserve the character's current horizontal `scale.x` facing.
+	 * that should preserve the character's current horizontal facing.
 	 */
 	public solveTwoBoneIK(
 		targetWorldX: number,
@@ -1029,7 +1326,8 @@ export class OrthoRig extends Container {
 			);
 		}
 
-		const currentFacing: 1 | -1 = this.scale.x < 0 ? -1 : 1;
+		const currentFacing: 1 | -1 = this.facing;
+		const absScaleX = Math.abs(this.scale.x) || 1;
 		const rootTf = this.getBoneLocalCharacterTransform(upperBoneName);
 		const result = solveTwoBoneChain({
 			constraintName,
@@ -1042,6 +1340,7 @@ export class OrthoRig extends Container {
 			parentRotation: rootTf.parentRotation,
 			rigWorldX: this.x,
 			rigWorldY: this.y,
+			rigScaleX: absScaleX,
 			rigScaleY: this.scale.y,
 			targetWorldX,
 			targetWorldY,
@@ -1054,7 +1353,7 @@ export class OrthoRig extends Container {
 		});
 
 		if (autoFlipFacing) {
-			this.scale.x = result.facing;
+			this.facing = result.facing;
 		}
 		upperNode.container.rotation = result.upperLocalRotation;
 		lowerNode.container.rotation = result.lowerLocalRotation;
@@ -1073,6 +1372,7 @@ export class OrthoRig extends Container {
 			this.y,
 			this.scale.y,
 			this.socketNodes,
+			Math.abs(this.scale.x) || 1,
 		);
 	}
 }

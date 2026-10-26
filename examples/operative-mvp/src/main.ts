@@ -1,11 +1,5 @@
-import { OrthoRig, type OrthoRigSchema } from "@crenet/orthorig";
-import {
-	Application,
-	Assets,
-	Container,
-	Graphics,
-	type Texture,
-} from "pixi.js";
+import { loadOrthoRigBundle, OrthoRig } from "@crenet/orthorig";
+import { Application, Container, Graphics } from "pixi.js";
 import {
 	buildArenaPlatforms,
 	drawReticle,
@@ -68,19 +62,9 @@ async function bootstrap(): Promise<void> {
 	host.appendChild(app.canvas);
 
 	const baseUrl = import.meta.env.BASE_URL;
-	const response = await fetch(`${baseUrl}assets/operative.orthorig.json`);
-	const schema = (await response.json()) as OrthoRigSchema;
-
-	let atlasTexture: Texture | undefined;
-	if (schema.meta.atlasTexture) {
-		try {
-			atlasTexture = await Assets.load<Texture>(
-				`${baseUrl}assets/${schema.meta.atlasTexture}`,
-			);
-		} catch {
-			atlasTexture = undefined;
-		}
-	}
+	const { schema, atlasTexture } = await loadOrthoRigBundle(
+		`${baseUrl}assets/operative.orthorig.json`,
+	);
 
 	const arenaLayer = new Graphics();
 	const fxLayer = new Graphics();
