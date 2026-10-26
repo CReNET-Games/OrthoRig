@@ -1,4 +1,8 @@
-import type { OrthoKeyframe } from "./types";
+import type {
+	OrthoAnimationClip,
+	OrthoKeyframe,
+	OrthoRigSchema,
+} from "./types.js";
 
 /**
  * Wrap an angle in radians to `(-PI, PI]`.
@@ -106,4 +110,57 @@ export function interpolateTrack(
 	const rotation = k0.rotation + dRot * alpha;
 
 	return { x, y, rotation };
+}
+
+/**
+ * Uniformly scale all spatial coordinates (`bones`, `sockets`, `slots`, and `animations` keyframe translations)
+ * in a compiled `OrthoRigSchema` while preserving unscaled `slot.atlasRegion` texture pixel coordinates
+ * and crisp `1.5px` procedural outline strokes.
+ */
+export function scaleOrthoRigSchema(
+	schema: OrthoRigSchema,
+	scale: number,
+): OrthoRigSchema {
+	const s = Number.isFinite(scale) && scale > 0 ? scale : 1;
+	const scaledAnimations: Record<string, OrthoAnimationClip> = {};
+	for (const [clipName, clip] of Object.entries(schema.animations)) {
+		const scaledTracks: Record<string, OrthoKeyframe[]> = {};
+		for (const [boneName, keyframes] of Object.entries(clip.tracks)) {
+			scaledTracks[boneName] = keyframes.map((kf) => ({
+				...kf,
+				x: kf.x * s,
+				y: kf.y * s,
+			}));
+		}
+		scaledAnimations[clipName] = {
+			...clip,
+			tracks: scaledTracks,
+		};
+	}
+
+	return {
+		...schema,
+		bones: schema.bones.map((b) => ({
+			...b,
+			length: b.length * s,
+			restX: b.restX * s,
+			restY: b.restY * s,
+		})),
+		sockets: schema.sockets
+			? schema.sockets.map((sock) => ({
+					...sock,
+					x: sock.x * s,
+					y: sock.y * s,
+				}))
+			: undefined,
+		slots: schema.slots.map((slot) => ({
+			...slot,
+			width: slot.width * s,
+			height: slot.height * s,
+			offsetX: slot.offsetX * s,
+			offsetY: slot.offsetY * s,
+			points: slot.points ? slot.points.map((p) => p * s) : undefined,
+		})),
+		animations: scaledAnimations,
+	};
 }

@@ -1,5 +1,5 @@
-import { clamp, normalizeAngle } from "./math";
-import type { IKSolveResult, LookAtSolveResult } from "./types";
+import { clamp, normalizeAngle } from "./math.js";
+import type { IKSolveResult, LookAtSolveResult } from "./types.js";
 
 export interface TwoBoneSolveParams {
 	constraintName: string;
@@ -15,6 +15,8 @@ export interface TwoBoneSolveParams {
 	parentRotation: number;
 	rigWorldX: number;
 	rigWorldY: number;
+	/** Rig X scale magnitude or signed scale (defaults to `1`). */
+	rigScaleX?: number;
 	rigScaleY: number;
 	/** World-space X coordinate of the IK target (cursor, ground contact point, grip socket, etc.). */
 	targetWorldX: number;
@@ -22,12 +24,12 @@ export interface TwoBoneSolveParams {
 	targetWorldY: number;
 	bendDirection: 1 | -1;
 	/**
-	 * Whether this IK chain determines horizontal character facing (`scale.x = 1 | -1`) based on
+	 * Whether this IK chain determines horizontal character facing (`1 | -1`) based on
 	 * which side of `rigWorldX` the target lies on. Set to `true` (default) for primary aim chains,
 	 * or `false` for secondary chains like foot terrain placement or off-hand weapon grips.
 	 */
 	autoFlipFacing?: boolean;
-	/** Current horizontal facing (`1` or `-1`), used when `autoFlipFacing` is `false`. */
+	/** Current horizontal facing (`1` or `-1`), used when `autoFlipFacing` is `false` or inside the `1e-4` vertical deadzone. */
 	currentFacing?: 1 | -1;
 	/** FK-to-IK blend weight in `[0, 1]` (`1.0` = full IK, `0.0` = pure FK). Defaults to `1.0`. */
 	mix?: number;
@@ -47,6 +49,7 @@ export interface LookAtSolveParams {
 	fkLocalRotation: number;
 	rigWorldX: number;
 	rigWorldY: number;
+	rigScaleX?: number;
 	rigScaleY: number;
 	currentFacing: 1 | -1;
 	targetWorldX: number;
@@ -64,6 +67,7 @@ export interface LookAtSolveParams {
  * - Clamps target distance to `[|L1 - L2| + 1e-4, L1 + L2 - 1e-4]` to prevent `Math.acos` `NaN` singularities.
  * - Supports both auto-flipping primary chains (`autoFlipFacing: true`) and facing-preserving
  *   secondary chains (`autoFlipFacing: false`), inverting the world-space bend direction when `facing === -1`.
+ * - Preserves non-unit rig scales (`|rigScaleX|`, `rigScaleY`) and applies a `1e-4` vertical deadzone on `dxWorld`.
  * - Supports smooth FK-to-IK blending via `mix` in `[0, 1]`.
  */
 export function solveTwoBoneChain(params: TwoBoneSolveParams): IKSolveResult {
@@ -78,6 +82,7 @@ export function solveTwoBoneChain(params: TwoBoneSolveParams): IKSolveResult {
 		parentRotation,
 		rigWorldX,
 		rigWorldY,
+		rigScaleX = 1,
 		rigScaleY,
 		targetWorldX,
 		targetWorldY,
@@ -90,25 +95,28 @@ export function solveTwoBoneChain(params: TwoBoneSolveParams): IKSolveResult {
 	} = params;
 
 	const clampedMix = clamp(mix, 0, 1);
+	const currentFacingSign: 1 | -1 = currentFacing < 0 ? -1 : 1;
 
-	// 1. Determine active horizontal facing (either driven by target X or preserved from currentFacing)
+	// 1. Determine active horizontal facing (with 1e-4 deadzone so aiming straight up/down preserves currentFacing)
 	const dxWorld = targetWorldX - rigWorldX;
 	const dyWorld = targetWorldY - rigWorldY;
 	const facing: 1 | -1 = autoFlipFacing
-		? dxWorld < 0
-			? -1
-			: 1
-		: currentFacing < 0
-			? -1
-			: 1;
+		? Math.abs(dxWorld) <= 1e-4
+			? currentFacingSign
+			: dxWorld < 0
+				? -1
+				: 1
+		: currentFacingSign;
 
 	// World-space effective bend direction inverts when mirrored horizontally
 	const effectiveBendDirection: 1 | -1 =
 		facing === -1 ? (-bendDirection as 1 | -1) : bendDirection;
 
-	// 2. Convert world target into root character space (where X is mirrored by facing)
+	// 2. Convert world target into root character space (accounting for both facing and |rigScaleX| / rigScaleY)
+	const absScaleX = Math.abs(rigScaleX) > 1e-9 ? Math.abs(rigScaleX) : 1;
+	const signedScaleX = facing * absScaleX;
 	const sy = Math.abs(rigScaleY) > 1e-9 ? rigScaleY : 1;
-	const localTargetX = dxWorld * facing;
+	const localTargetX = dxWorld / signedScaleX;
 	const localTargetY = dyWorld / sy;
 
 	// 3. Law of Cosines with strict distance clamping [|L1 - L2| + 1e-4, L1 + L2 - 1e-4]
@@ -127,7 +135,7 @@ export function solveTwoBoneChain(params: TwoBoneSolveParams): IKSolveResult {
 	);
 
 	// In PixiJS Y-down space, -bendDirection * acos(cosMid) bends the middle joint (elbow/knee)
-	// in the configured direction. Because root scale.x = facing already reflects the local
+	// in the configured direction. Because root scale.x = facing * |scale.x| already reflects the local
 	// coordinate frame horizontally, this local angle automatically corresponds to the inverted
 	// world bend direction (`effectiveBendDirection`) when facing === -1.
 	const solvedLowerLocal = -bendDirection * Math.acos(cosMid);
@@ -161,7 +169,7 @@ export function solveTwoBoneChain(params: TwoBoneSolveParams): IKSolveResult {
 
 	const upperWorldAngle = parentRotation + upperLocalRotation;
 
-	// 4. Compute resulting joint positions in both local and world space
+	// 4. Compute resulting joint positions in both local and world/parent space
 	const midLocalX = rootLocalX + L1 * Math.cos(upperWorldAngle);
 	const midLocalY = rootLocalY + L1 * Math.sin(upperWorldAngle);
 	const lowerAngle = upperWorldAngle + lowerLocalRotation;
@@ -173,15 +181,15 @@ export function solveTwoBoneChain(params: TwoBoneSolveParams): IKSolveResult {
 	const endLocal = { x: endLocalX, y: endLocalY };
 
 	const rootWorld = {
-		x: rigWorldX + rootLocalX * facing,
+		x: rigWorldX + rootLocalX * signedScaleX,
 		y: rigWorldY + rootLocalY * sy,
 	};
 	const midWorld = {
-		x: rigWorldX + midLocalX * facing,
+		x: rigWorldX + midLocalX * signedScaleX,
 		y: rigWorldY + midLocalY * sy,
 	};
 	const endWorld = {
-		x: rigWorldX + endLocalX * facing,
+		x: rigWorldX + endLocalX * signedScaleX,
 		y: rigWorldY + endLocalY * sy,
 	};
 	const aimWorldAngle = Math.atan2(
@@ -234,6 +242,7 @@ export function solveLookAtConstraint(
 		fkLocalRotation,
 		rigWorldX,
 		rigWorldY,
+		rigScaleX = 1,
 		rigScaleY,
 		currentFacing,
 		targetWorldX,
@@ -245,9 +254,11 @@ export function solveLookAtConstraint(
 
 	const clampedMix = clamp(mix, 0, 1);
 	const facing: 1 | -1 = currentFacing < 0 ? -1 : 1;
+	const absScaleX = Math.abs(rigScaleX) > 1e-9 ? Math.abs(rigScaleX) : 1;
+	const signedScaleX = facing * absScaleX;
 	const sy = Math.abs(rigScaleY) > 1e-9 ? rigScaleY : 1;
 
-	const localTargetX = (targetWorldX - rigWorldX) * facing;
+	const localTargetX = (targetWorldX - rigWorldX) / signedScaleX;
 	const localTargetY = (targetWorldY - rigWorldY) / sy;
 
 	const dx = localTargetX - boneLocalX;

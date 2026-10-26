@@ -1,5 +1,5 @@
 import type { Graphics } from "pixi.js";
-import type { IKSolveResult, OrthoBoneNode, OrthoSocketNode } from "./types";
+import type { IKSolveResult, OrthoBoneNode, OrthoSocketNode } from "./types.js";
 
 const NEON_GREEN = 0x00ff66;
 const NEON_MAGENTA = 0xff00ff;
@@ -23,6 +23,7 @@ export function drawDebugSkeletonOverlay(
 	rigWorldY: number,
 	rigScaleY: number,
 	socketNodes?: ReadonlyMap<string, OrthoSocketNode>,
+	rigScaleX: number = 1,
 ): void {
 	g.clear();
 
@@ -52,11 +53,13 @@ export function drawDebugSkeletonOverlay(
 		}
 	}
 
+	const absScaleX = Math.abs(rigScaleX) > 1e-9 ? Math.abs(rigScaleX) : 1;
 	const sy = Math.abs(rigScaleY) > 1e-9 ? rigScaleY : 1;
 
 	for (const ik of ikResults) {
 		const { rootLocal, midLocal, endLocal, targetWorld, facing } = ik;
-		const localTargetX = (targetWorld.x - rigWorldX) * facing;
+		const signedScaleX = facing * absScaleX;
+		const localTargetX = (targetWorld.x - rigWorldX) / signedScaleX;
 		const localTargetY = (targetWorld.y - rigWorldY) / sy;
 
 		// Magenta IK target vector from chain root to target
