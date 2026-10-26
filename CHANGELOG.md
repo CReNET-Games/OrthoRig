@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0](https://github.com/CReNET-Games/OrthoRig/compare/v0.2.0...v0.3.0) (2026-10-26)
+
+
+### Features
+
+* **runtime:** add aim-by-angle helpers, scene-graph world transforms, and bundle loader ([574218c](https://github.com/CReNET-Games/OrthoRig/commit/574218c0361461f6506e4c026c4180c416f323a9))
+* **runtime:** add loadOrthoRigBundle and OrthoRig.fromUrl asset loader helpers ([574218c](https://github.com/CReNET-Games/OrthoRig/commit/574218c0361461f6506e4c026c4180c416f323a9))
+* **runtime:** add scaleOrthoRigSchema and preserve non-unit scale in 2-Bone IK and Look-At solvers ([d9834df](https://github.com/CReNET-Games/OrthoRig/commit/d9834df31456be0b85969f2495ff181bc9fc1745))
+* **runtime:** add updateWithAimAngle, setAimDirection, and setIKTargetAngle with vertical deadzone ([574218c](https://github.com/CReNET-Games/OrthoRig/commit/574218c0361461f6506e4c026c4180c416f323a9))
+* **runtime:** support relativeTo container space in getSocketWorldTransform and getBoneWorldTransform ([574218c](https://github.com/CReNET-Games/OrthoRig/commit/574218c0361461f6506e4c026c4180c416f323a9))
+
+
+### Bug Fixes
+
+* **runtime:** emit explicit .js extensions in ESM build output for NodeNext and Vitest ([886852a](https://github.com/CReNET-Games/OrthoRig/commit/886852a78b05098104327436197af4d644c22009))
+
 ## [0.2.0](https://github.com/CReNET-Games/OrthoRig/compare/v0.1.0...v0.2.0) (2026-10-25)
 
 
