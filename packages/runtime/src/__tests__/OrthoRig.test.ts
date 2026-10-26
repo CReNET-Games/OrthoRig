@@ -856,20 +856,25 @@ describe("6. Downstream Integration Ergonomics (Scaling, Aim-by-Angle, Scene-Gra
 		expect(instance.slots.get("slot_torso_plate")).toBeInstanceOf(Sprite);
 	});
 
-	it("emits explicit .js extensions on all relative imports/exports in dist/*.js and dist/*.d.ts", () => {
+	it("uses explicit .js extensions on all relative imports/exports in src/*.ts and dist/*.{js,d.ts}", () => {
+		const srcDir = path.join(ROOT, "packages/runtime/src");
 		const distDir = path.join(ROOT, "packages/runtime/dist");
-		expect(fs.existsSync(distDir)).toBe(true);
-
-		const distFiles = fs
-			.readdirSync(distDir)
-			.filter((f) => f.endsWith(".js") || f.endsWith(".d.ts"));
-		expect(distFiles.length).toBeGreaterThan(0);
+		const dirsToCheck = [srcDir, ...(fs.existsSync(distDir) ? [distDir] : [])];
 
 		const relSpecifierRegex = /(?:from|import)\s+["'](\.[^"']+)["']/g;
-		for (const file of distFiles) {
-			const content = fs.readFileSync(path.join(distDir, file), "utf8");
-			for (const match of content.matchAll(relSpecifierRegex)) {
-				expect(match[1].endsWith(".js")).toBe(true);
+		for (const dir of dirsToCheck) {
+			const files = fs
+				.readdirSync(dir)
+				.filter(
+					(f) => f.endsWith(".ts") || f.endsWith(".js") || f.endsWith(".d.ts"),
+				);
+			expect(files.length).toBeGreaterThan(0);
+
+			for (const file of files) {
+				const content = fs.readFileSync(path.join(dir, file), "utf8");
+				for (const match of content.matchAll(relSpecifierRegex)) {
+					expect(match[1].endsWith(".js")).toBe(true);
+				}
 			}
 		}
 	});
