@@ -116,29 +116,34 @@ npm install @crenet/orthorig
 ```
 
 ```typescript
-import { OrthoRig, type OrthoRigSchema } from "@crenet/orthorig";
-import { Application, Assets, Container, type Texture } from "pixi.js";
+import { loadOrthoRigBundle, OrthoRig } from "@crenet/orthorig";
+import { Application, Container } from "pixi.js";
 
 const app = new Application();
 await app.init({ width: 1280, height: 720 });
 document.body.appendChild(app.canvas);
 
-// 1. Load compiled .orthorig.json asset (and optional baked atlas texture)
-const response = await fetch("./assets/operative.orthorig.json");
-const schema = (await response.json()) as OrthoRigSchema;
-const atlasTexture = schema.meta.atlasTexture
-	? await Assets.load<Texture>(`./assets/${schema.meta.atlasTexture}`)
-	: undefined;
+// 1. Load compiled .orthorig.json + sibling .atlas.png (with optional uniform scale) in one call
+const { schema, atlasTexture } = await loadOrthoRigBundle(
+	"./assets/operative.orthorig.json",
+	{ scale: 0.3 },
+);
 
-// 2. Instantiate OrthoRig and attach to the PixiJS stage
+// 2. Instantiate OrthoRig and attach to an entity container or stage
+const entitiesLayer = new Container();
+app.stage.addChild(entitiesLayer);
+
+const playerContainer = new Container();
+playerContainer.position.set(640, 400);
+entitiesLayer.addChild(playerContainer);
+
 const rig = new OrthoRig(schema, {
 	initialAnimation: "Idle",
 	atlasTexture,
-	preferAtlasSprites: false, // Toggle at any time via rig.setAtlasMode(true)
+	preferAtlasSprites: true, // Toggle at any time via rig.setAtlasMode(false)
 	debugDraw: false,
 });
-rig.position.set(640, 400);
-app.stage.addChild(rig);
+playerContainer.addChild(rig);
 
 // 3. Attach custom child containers to named sockets & subscribe to timeline events
 const muzzleVfx = new Container();
@@ -155,17 +160,14 @@ rig.play("Run", 0.12);
 rig.playLayer(1, "Recoil", { mode: "additive", loop: false, weight: 1.0 });
 
 // 5. Advance animation and solve 360° Analytic 2-Bone IK + 1-Bone Look-At each tick
-let aimTarget = { x: 800, y: 300 };
-window.addEventListener("pointermove", (e) => {
-	aimTarget = { x: e.clientX, y: e.clientY };
-});
-
+//    using either cursor coordinates (`rig.update(dt, targetX, targetY)`) or an aim angle in radians:
 app.ticker.add((ticker) => {
 	const dt = ticker.deltaMS / 1000;
-	rig.update(dt, aimTarget.x, aimTarget.y);
+	const aimAngleRadians = -0.25;
+	rig.updateWithAimAngle(dt, aimAngleRadians, rig.facing);
 
-	// Read exact world-space socket transform (e.g. for spawning projectiles)
-	const muzzle = rig.getSocketWorldTransform("muzzle");
+	// Read exact socket transform in world space or relative to `entitiesLayer`
+	const muzzle = rig.getSocketWorldTransform("muzzle", entitiesLayer);
 });
 ```
 

@@ -8,6 +8,8 @@ import {
 	clamp,
 	createSlotAttachment,
 	evaluateCubicBezier,
+	loadOrthoRigAssets,
+	loadOrthoRigBundle,
 	normalizeAngle,
 	type OrthoAnimationEvent,
 	type OrthoKeyframe,
@@ -15,7 +17,8 @@ import {
 	type OrthoRigSchema,
 	type OrthoSlotSpec,
 	parseHexColor,
-} from "../index";
+	scaleOrthoRigSchema,
+} from "../index.js";
 
 const ROOT = path.resolve(import.meta.dirname, "../../../..");
 const SCHEMA_FILE = path.join(ROOT, "schema/orthorig.schema.json");
@@ -667,7 +670,212 @@ describe("5. Animation State Machine, Layers, Sockets & Timeline Events (Paramet
 	});
 });
 
-describe("6. Automated Clean-Room IP, License & Shingle Similarity Audit", () => {
+describe("6. Downstream Integration Ergonomics (Scaling, Aim-by-Angle, Scene-Graph Transforms, Bundle Loader & ESM Specifiers)", () => {
+	it.each([
+		{
+			label: "schema-level scaling via options.scale = 0.3",
+			useSchemaScale: true,
+			containerScale: 1.0,
+			scaleFactor: 0.3,
+		},
+		{
+			label: "container-level scaling via rig.scale.set(0.3, 0.3)",
+			useSchemaScale: false,
+			containerScale: 0.3,
+			scaleFactor: 0.3,
+		},
+	])(
+		"preserves non-unit scale ($label) during 2-Bone IK aiming and facing flips",
+		({ useSchemaScale, containerScale, scaleFactor }) => {
+			const rig = new OrthoRig(rigData, {
+				scale: useSchemaScale ? scaleFactor : undefined,
+			});
+			rig.position.set(500, 400);
+			if (!useSchemaScale) {
+				rig.scale.set(containerScale, containerScale);
+			}
+
+			const rootSpec = rig.schema.bones.find((b) => b.name === "root")!;
+			expect(rootSpec.restY).toBeCloseTo(
+				useSchemaScale ? -64 * scaleFactor : -64,
+				4,
+			);
+
+			// Aim behind spine (left) at an in-reach target
+			const shoulderTf = rig.getBoneWorldTransform("upper_arm_r");
+			const tx = shoulderTf.x - 36 * scaleFactor;
+			const ty = shoulderTf.y - 12 * scaleFactor;
+			rig.update(0, tx, ty);
+
+			expect(rig.facing).toBe(-1);
+			expect(rig.scale.x).toBeCloseTo(-containerScale, 5);
+			expect(rig.scale.y).toBeCloseTo(containerScale, 5);
+			expect(rig.ikResult!.endWorld.x).toBeCloseTo(tx, 2);
+			expect(rig.ikResult!.endWorld.y).toBeCloseTo(ty, 2);
+
+			// Verify scaleOrthoRigSchema preserves unscaled atlasRegion pixel coordinates
+			const scaledSchema = scaleOrthoRigSchema(rigData, scaleFactor);
+			expect(scaledSchema.slots[0].atlasRegion).toEqual(
+				rigData.slots[0].atlasRegion,
+			);
+		},
+	);
+
+	it.each([
+		{
+			label: "aim straight right (0 rad)",
+			angle: 0,
+			fallbackFacing: -1 as const,
+			expectedFacing: 1 as const,
+		},
+		{
+			label: "aim straight left (PI rad)",
+			angle: Math.PI,
+			fallbackFacing: 1 as const,
+			expectedFacing: -1 as const,
+		},
+		{
+			label:
+				"aim straight up (-PI/2 rad) while facing left -> preserves facing = -1",
+			angle: -Math.PI / 2,
+			fallbackFacing: -1 as const,
+			expectedFacing: -1 as const,
+		},
+		{
+			label:
+				"aim straight down (+PI/2 rad) while facing right -> preserves facing = +1",
+			angle: Math.PI / 2,
+			fallbackFacing: 1 as const,
+			expectedFacing: 1 as const,
+		},
+	])(
+		"updateWithAimAngle ($label): enforces 1e-4 vertical deadzone and tracks ray",
+		({ angle, fallbackFacing, expectedFacing }) => {
+			const rig = new OrthoRig(rigData, { scale: 0.3 });
+			rig.position.set(0, 24);
+			rig.facing = fallbackFacing;
+
+			rig.updateWithAimAngle(1 / 60, angle, fallbackFacing);
+
+			expect(rig.facing).toBe(expectedFacing);
+			const barrel = rig.getBoneWorldTransform("forearm_r");
+			expect(Math.abs(normalizeAngle(barrel.rotation - angle))).toBeLessThan(
+				0.005,
+			);
+		},
+	);
+
+	it("computes scene-graph-aware socket & bone transforms across nested containers and relativeTo targets", () => {
+		const stage = new Container();
+		const entitiesLayer = new Container();
+		entitiesLayer.position.set(100, 50);
+		stage.addChild(entitiesLayer);
+
+		const playerContainer = new Container();
+		playerContainer.position.set(640, 360);
+		entitiesLayer.addChild(playerContainer);
+
+		const siblingOverlay = new Container();
+		siblingOverlay.position.set(200, 150);
+		stage.addChild(siblingOverlay);
+
+		const rig = new OrthoRig(rigData, { scale: 0.3 });
+		rig.position.set(0, 24);
+		playerContainer.addChild(rig);
+
+		rig.updateWithAimAngle(0, 0, 1);
+
+		const muzzleParent = rig.getSocketWorldTransform("muzzle", playerContainer);
+		const muzzleEntities = rig.getSocketWorldTransform("muzzle", entitiesLayer);
+		const muzzleGlobal = rig.getSocketWorldTransform("muzzle");
+		const muzzleSibling = rig.getSocketWorldTransform("muzzle", siblingOverlay);
+
+		expect(muzzleEntities.x).toBeCloseTo(640 + muzzleParent.x, 4);
+		expect(muzzleEntities.y).toBeCloseTo(360 + muzzleParent.y, 4);
+		expect(muzzleGlobal.x).toBeCloseTo(100 + 640 + muzzleParent.x, 4);
+		expect(muzzleGlobal.y).toBeCloseTo(50 + 360 + muzzleParent.y, 4);
+		expect(muzzleSibling.x).toBeCloseTo(muzzleGlobal.x - 200, 4);
+		expect(muzzleSibling.y).toBeCloseTo(muzzleGlobal.y - 150, 4);
+
+		// Secondary targetSocket ("offhand_grip") must still converge in nested container space
+		const gripParent = rig.getSocketWorldTransform(
+			"offhand_grip",
+			playerContainer,
+		);
+		const leftGrip = rig.getIKResult("left_arm_grip")!;
+		expect(leftGrip.endWorld.x).toBeCloseTo(gripParent.x, 2);
+		expect(leftGrip.endWorld.y).toBeCloseTo(gripParent.y, 2);
+	});
+
+	it("loads schema and sibling atlasTexture via loadOrthoRigBundle and OrthoRig.fromUrl", async () => {
+		expect(loadOrthoRigAssets).toBe(loadOrthoRigBundle);
+
+		const mockFetch = async () =>
+			({
+				ok: true,
+				status: 200,
+				json: async () => rigData,
+			}) as unknown as Response;
+
+		const loadedUrls: string[] = [];
+		const bundle = await loadOrthoRigBundle("/assets/operative.orthorig.json", {
+			scale: 0.3,
+			fetch: mockFetch,
+			loadTexture: async (url) => {
+				loadedUrls.push(url);
+				return Texture.WHITE;
+			},
+		});
+
+		expect(loadedUrls).toEqual(["/assets/operative.atlas.png"]);
+		expect(bundle.atlasUrl).toBe("/assets/operative.atlas.png");
+		expect(bundle.atlasTexture).toBe(Texture.WHITE);
+		expect(
+			bundle.schema.bones.find((b) => b.name === "root")!.restY,
+		).toBeCloseTo(-64 * 0.3, 4);
+
+		// Graceful fallback when atlas fails to load and strictAtlas is false
+		const fallbackBundle = await OrthoRig.loadBundle(
+			"operative.orthorig.json",
+			{
+				fetch: mockFetch,
+				loadTexture: async () => {
+					throw new Error("404 atlas");
+				},
+			},
+		);
+		expect(fallbackBundle.atlasTexture).toBeUndefined();
+
+		// One-call OrthoRig.fromUrl / OrthoRig.load instantiation
+		const instance = await OrthoRig.load("/assets/operative.orthorig.json", {
+			scale: 0.3,
+			fetch: mockFetch,
+			loadTexture: async () => Texture.WHITE,
+		});
+		expect(instance).toBeInstanceOf(OrthoRig);
+		expect(instance.slots.get("slot_torso_plate")).toBeInstanceOf(Sprite);
+	});
+
+	it("emits explicit .js extensions on all relative imports/exports in dist/*.js and dist/*.d.ts", () => {
+		const distDir = path.join(ROOT, "packages/runtime/dist");
+		expect(fs.existsSync(distDir)).toBe(true);
+
+		const distFiles = fs
+			.readdirSync(distDir)
+			.filter((f) => f.endsWith(".js") || f.endsWith(".d.ts"));
+		expect(distFiles.length).toBeGreaterThan(0);
+
+		const relSpecifierRegex = /(?:from|import)\s+["'](\.[^"']+)["']/g;
+		for (const file of distFiles) {
+			const content = fs.readFileSync(path.join(distDir, file), "utf8");
+			for (const match of content.matchAll(relSpecifierRegex)) {
+				expect(match[1].endsWith(".js")).toBe(true);
+			}
+		}
+	});
+});
+
+describe("7. Automated Clean-Room IP, License & Shingle Similarity Audit", () => {
 	it("passes clean-room IP, dependency license, and token-shingle similarity audit", () => {
 		const audit = runIpComplianceAudit();
 		expect(audit.passed).toBe(true);
