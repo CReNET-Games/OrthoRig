@@ -1,6 +1,6 @@
 import { Graphics, Rectangle, Sprite, Texture } from "pixi.js";
-import { parseHexColor } from "./math";
-import type { OrthoSlotSpec } from "./types";
+import { parseHexColor } from "./math.js";
+import type { OrthoSlotSpec } from "./types.js";
 
 /**
  * Draw procedural `rect` or `polygon` cutout geometry onto a `PIXI.Graphics` slot node.
