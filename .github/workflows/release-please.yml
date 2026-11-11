@@ -41,7 +41,7 @@ jobs:
 
       # Checkout and setup Node.js for publishing (runs for both Canary and Release)
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
