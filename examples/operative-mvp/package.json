@@ -10,7 +10,7 @@
 	},
 	"dependencies": {
 		"@crenet/orthorig": "*",
-		"pixi.js": "^8.22.0"
+		"pixi.js": "^8.23.0"
 	},
 	"devDependencies": {
 		"typescript": "^7.0.2",
